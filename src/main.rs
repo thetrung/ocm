@@ -21,6 +21,7 @@ use binance::account::*;
 fn main() {
     // CONSTANT
     const DELAY_INIT: time::Duration = time::Duration::from_millis(100);
+    const DELAY_ROUND: time::Duration = time::Duration::from_millis(1000*5);
 
     //
     // CONFIG 
@@ -51,7 +52,7 @@ fn main() {
     //     println!("{}", ignore);
     // }
     
-    let rings = symbol_scan(&market, &ignored_symbols, &bridges_symbols, &mut data_cache);
+    let rings = symbol_discovery(&market, &ignored_symbols, &bridges_symbols, &mut data_cache);
 
     //
     // THREADS
@@ -64,19 +65,15 @@ fn main() {
         let thread = thread::spawn(|| { order_chain(thread_ring) });
         hunter_pool.push(thread);
     }
-
-    //
-    // later, we may use signal to trigger this
-    //
-    println!("> Last Block before joining all threads.. <");
-
     //
     // Joining all
     //
+    let mut round_result = vec![];
     for hunter in hunter_pool{
         match hunter.join().unwrap() {
             Some(name) => {
-                println!("\"{}\"",name);
+                // make a list of ring:
+                round_result.push(name);
                 //
                 // Plan :
                 // We may rank the most profit one from each round,
@@ -90,6 +87,16 @@ fn main() {
 
             }
         }
+    }
+    thread::sleep(DELAY_ROUND);
+    //
+    // later, we may use signal to trigger this
+    //
+    println!("> Joining all threads.. <");
+    println!("=== This Round result ===");
+
+    for name in round_result {
+        println!("\"{}\"",name);
     }
 
     // ending
@@ -129,7 +136,7 @@ fn order_chain(ring: [String;3]) -> Option<String> {
         }
     }
     // calculate if it's profitable :
-    let invest = 5000.0;
+    let invest = 5000.0; // x15 Max Parallel Executors each round (?)
     let binance_fees = 0.1; // as 0.1 ~ 0.0750% 
     let warning_ratio = 20.0; // 1:20 ratio
     let fees = 1.0 - (binance_fees / 100.0); 
@@ -147,16 +154,30 @@ fn order_chain(ring: [String;3]) -> Option<String> {
     // OK
     //
     if profit > 0.0 {
-        println!("ring: {} {} {}",ring_prices[0], ring_prices[1], ring_prices[2]);
-        println!("{}={}\n\n", &ring_name, (&profit).to_string().green());
+
+        println!("{}",
+            format!("ring: {} > {} > {}",
+            ring_prices[0], ring_prices[1], ring_prices[2]).to_string().cyan());
+
+        println!("{} = {} / {:.5}%\n\n", 
+            &ring_name.bold(), 
+            (&profit).to_string().green(), 
+            ((&profit/&invest)*100.0).to_string().yellow());
+
         return Some(ring_name);
     }
     
     return None;
 }
 
+// TODO:
+// - Save discovered pairs to a cache file
+// - Only re-run cache if no cache file is found, or forced update.
+// * This should be done to reduce function call and init time.
+//
+//
 // 'a is to fix the damn "named lifetime parameter" to indicate same data flow
-fn symbol_scan<'a>(
+fn symbol_discovery<'a>(
     market: &Market,
     symbols_except: &Vec<&str>, 
     symbols_bridge: &Vec<&str>,
@@ -210,8 +231,8 @@ fn symbol_scan<'a>(
         Err(e) => println!("Error with data_cache = {:2}\n", e),
     }
 
-    println!("Total bridge-able BNB symbols is {}\n", symbols_BNB.len());
-    println!("Total bridge-able BUSD symbols is {}\n", symbols_BUSD.len());
+    println!("Total bridge-able BNB symbols is {}", symbols_BNB.len());
+    println!("Total bridge-able BUSD symbols is {}", symbols_BUSD.len());
 
     let mut symbols_rings = vec![];
 
@@ -219,7 +240,7 @@ fn symbol_scan<'a>(
         let name = String::from(sym.strip_suffix("BUSD").unwrap());
         let bridge = [name.clone(), "BNB".to_string()].join("");
         if symbols_BNB.contains(&bridge.as_str()) {
-            println!("converting {} to {} for {}", &sym, &name.as_str(), &bridge.as_str());
+            // println!("converting {} to {} for {}", &sym, &name.as_str(), &bridge.as_str());
             //
             // Note:
             // Remember to clone/new String to copy/concat around.
@@ -230,7 +251,7 @@ fn symbol_scan<'a>(
                 "BNBBUSD".to_string()
             ]);
         }
-        println!("{}-{}-{}", sym, bridge, "BNBBUSD"); // name+bridge moved here
+        // println!("{}-{}-{}", sym, bridge, "BNBBUSD"); // name+bridge moved here
     }
 
     println!("Total symbol rings is {}\n", symbols_rings.len());
