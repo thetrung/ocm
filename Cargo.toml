@@ -8,6 +8,5 @@ edition = "2018"
 
 [dependencies]
 colored = "2"
-serde = "1.0"
 configparser = "2.0.0"
 binance = { git = "https://github.com/wisespace-io/binance-rs.git" }

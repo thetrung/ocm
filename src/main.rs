@@ -48,29 +48,29 @@ fn main() {
     // to cache prices for each symbol before computing profitable chances.
     // 
     //
-    match market.get_all_book_tickers() {
-        Ok(answer) => {
-            match &answer {
-                binance::model::BookTickers::AllBookTickers(all) => {
-                    match all {
-                        tickers => {
-                            for ticker in tickers {
-                                println!("{}: ask {} x {} === bid {} x {}", 
-                                ticker.symbol,    // Symbols
-                                ticker.ask_price, // Sell orders
-                                ticker.ask_qty,
-                                ticker.bid_price, // Buy orders
-                                ticker.bid_qty);
-                            }
-                        }
-                    }
-                }
-            }
-            // println!("{:?}", &answer);
-        },
-        Err(e) => println!("Error: {}", e),
-    }
-    return;
+    // match market.get_all_book_tickers() {
+    //     Ok(answer) => {
+    //         match &answer {
+    //             binance::model::BookTickers::AllBookTickers(all) => {
+    //                 match all {
+    //                     tickers => {
+    //                         for ticker in tickers {
+    //                             println!("{}: ask {} x {} === bid {} x {}", 
+    //                             ticker.symbol,    // Symbols
+    //                             ticker.ask_price, // Sell orders
+    //                             ticker.ask_qty,
+    //                             ticker.bid_price, // Buy orders
+    //                             ticker.bid_qty);
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         // println!("{:?}", &answer);
+    //     },
+    //     Err(e) => println!("Error: {}", e),
+    // }
+    // return;
     //
     // BUILD RINGS
     //
@@ -84,6 +84,9 @@ fn main() {
     let mut data_cache:Vec<SymbolPrice> = vec![];
     
     let rings = analyzer::symbol_discovery(&market, &ignored_symbols, &bridges_symbols, &mut data_cache);
+
+    // return;
+
     //
     // THREADS
     //

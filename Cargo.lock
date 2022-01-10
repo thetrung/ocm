@@ -54,7 +54,6 @@ dependencies = [
  "binance",
  "colored",
  "configparser",
- "serde",
 ]
 
 [[package]]

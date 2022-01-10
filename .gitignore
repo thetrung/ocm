@@ -2,3 +2,4 @@
 /target
 config.toml
 .DS_Store
+symbols.cache

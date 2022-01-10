@@ -9,7 +9,6 @@ use configparser::ini::Ini;
 use binance::{api::*, model::{Prices, SymbolPrice}};
 use binance::market::*;
 
-use serde::{Serialize, Deserialize};
 
 // TODO:
 // - Save discovered pairs to a cache file
@@ -26,91 +25,134 @@ use serde::{Serialize, Deserialize};
 // 2. symbol + BNB
 // then combine : 1 > 2 > 1
 //
+const SYMBOL_CACHE_FILE:&str = "symbols.cache";
+
 // 'a is to fix the damn "named lifetime parameter" to indicate same data flow
 pub fn symbol_discovery<'a>(
     market: &Market,
     symbols_except: &Vec<&str>, 
     symbols_bridge: &Vec<&str>,
-    data_cache: &'a mut Vec<SymbolPrice>) -> HashMap<String, [String; 3]>{
+    data_cache: &'a mut Vec<SymbolPrice>) -> HashMap<String, Vec<String>>{
+    //
+    // INIT CACHES
+    //
+    let mut symbols_stablecoin:Vec<&str> = vec![];
+    let mut symbols_with_bridge:Vec<&str> = vec![]; 
+    let mut symbols_rings: HashMap<String, Vec<String>> = HashMap::new();
 
     //
-    // INIT
+    // FIND & LOAD CACHED FILE
     //
-    let mut symbols_BUSD:Vec<&str> = vec![];
-    let mut symbols_BNB:Vec<&str> = vec![]; 
-
-    //
-    // Fetching all symbols from Binance.
-    //
-    match market.get_all_prices() {
-        Ok(answer) => {
-
-            match answer {
-                // need to match the exact enum
-                Prices::AllPrices(data) => {
-                    // caching
-                    *data_cache = data.clone();
-                    
-                    for symbol_price in data_cache {
+    let mut cache_file = Ini::new();
+    match cache_file.load(SYMBOL_CACHE_FILE) {
+        Ok(_) => { 
+            println!("> found prev cache");
+            for sym_map in cache_file.get_map() {
+                for discovered in sym_map {
+                    println!("> loading {} rings...", discovered.1.len());
+                    for symbol_ring in discovered.1 {
                         //
-                        // Filter stuffs here
-                        // TODO: use HashMap to add also prices
-                        let key = symbol_price.symbol.as_str();
-                        let mut bridge_iter = symbols_bridge.iter();
-                        // println!("key: {}", key);
-                        if bridge_iter.any(|bridge_sym| {
-                            // println!("item: {} vs. {}", &bridge_sym, key);
-                            key.contains(bridge_sym) 
-                        } && !symbols_except.contains(&key)) {
-                            // Passed :
-                            if key.ends_with("BUSD") {
-                                symbols_BUSD.push(key); 
-                                // println!(">> BUSD: {}", key);
-                            }
-                            else if key.ends_with("BNB"){
-                                symbols_BNB.push(key); 
-                                // println!(">> sym: {}", key);
-                            } 
-                        } else {
-                            // println!("ignored: {}", key);
-                        }
+                        // Build Ring :
+                        //
+                        // print!("\n{}: ", symbol_ring.0.to_uppercase());
+                        let ring:Vec<String> = symbol_ring.1.unwrap().split(",").map(|s| s.to_string()).collect();
+                        //
+                        // Insert into map :
+                        //
+                        // for sym in &ring { print!("{} ", sym)}
+                        symbols_rings.insert( symbol_ring.0.to_uppercase(), ring);
                     }
                 }
             }
         },
-        Err(e) => println!("Error with data_cache = {:2}\n", e),
-    }
-
-    println!("Total bridge-able BNB symbols is {}", symbols_BNB.len());
-    println!("Total bridge-able BUSD symbols is {}", symbols_BUSD.len());
-
-    let mut symbols_rings: HashMap<String, [String; 3]> = HashMap::new();
-
-    for sym in symbols_BUSD {
-        let name = String::from(sym.strip_suffix("BUSD").unwrap());
-        let bridge = [name.clone(), "BNB".to_string()].join("");
-        if symbols_BNB.contains(&bridge.as_str()) {
-            // println!("converting {} to {} for {}", &sym, &name.as_str(), &bridge.as_str());
+        _error => {
+            println!("> can't find symbol cache >> building one now ...");
             //
-            // Note:
-            // Remember to clone/new String to copy/concat around.
+            // Fetching all symbols from Binance.
             //
-            symbols_rings.insert(String::from(name), [
-                String::from(sym), 
-                bridge.clone(),     // clone bridge.
-                "BNBBUSD".to_string()
-            ]);
+            match market.get_all_prices() {
+                Ok(answer) => {
+
+                    match answer {
+                        // need to match the exact enum
+                        Prices::AllPrices(data) => {
+                            // caching
+                            *data_cache = data.clone();
+                            
+                            for symbol_price in data_cache {
+                                //
+                                // Filter stuffs here
+                                // TODO: use HashMap to add also prices
+                                let key = symbol_price.symbol.as_str();
+                                let mut bridge_iter = symbols_bridge.iter();
+                                // println!("key: {}", key);
+                                if bridge_iter.any(|bridge_sym| {
+                                    // println!("item: {} vs. {}", &bridge_sym, key);
+                                    key.contains(bridge_sym) 
+                                } && !symbols_except.contains(&key)) {
+                                    // Passed :
+                                    if key.ends_with("BUSD") {
+                                        symbols_stablecoin.push(key); 
+                                        // println!(">> BUSD: {}", key);
+                                    }
+                                    else if key.ends_with("BNB"){
+                                        symbols_with_bridge.push(key); 
+                                        // println!(">> sym: {}", key);
+                                    } 
+                                } else {
+                                    // println!("ignored: {}", key);
+                                }
+                            }
+                        }
+                    }
+                },
+                Err(e) => println!("Error with data_cache = {:2}\n", e),
+            }
+            println!("- Total bridge-paired symbols is {}", symbols_with_bridge.len());
+            println!("- Total stablecoin-paired symbols is {}", symbols_stablecoin.len());
+
+            for sym in symbols_stablecoin {
+                // 1 - stablecoin
+                // 2 - bridge
+                let name = String::from(sym.strip_suffix(symbols_bridge[0]).unwrap());
+                let bridge = [name.clone(), symbols_bridge[1].to_string()].join("");
+                if symbols_with_bridge.contains(&bridge.as_str()) {
+                    //
+                    // Note:
+                    // Remember to clone/new String to copy/concat around.
+                    //
+                    symbols_rings.insert(String::from(name), vec![
+                        String::from(sym), 
+                        bridge.clone(),     // clone bridge.
+                        "BNBBUSD".to_string()
+                    ]);
+                }
+                // println!("{}-{}-{}", sym, bridge, "BNBBUSD"); // name+bridge moved here
+            }
+            println!("- Total symbol rings is {}", symbols_rings.len());
+            //
+            // Save all discovered symbols >> cache file
+            //
+            let mut cache_file = Ini::new();
+            for sym in &symbols_rings {
+                cache_file.set(
+                    "discovered", 
+                    sym.0.as_str(), 
+                    Option::from(sym.1.join(",")));
+            }
+            match cache_file.write("symbols.cache") {
+                Ok(_) => println!("> built symbols cache."),
+                msg => println!("Error saving cache: {:?}", msg)
+            }
         }
-        // println!("{}-{}-{}", sym, bridge, "BNBBUSD"); // name+bridge moved here
     }
-
-    println!("Total symbol rings is {}\n", symbols_rings.len());
-
+    // Done !
+    println!("> built rings map.");
     return symbols_rings;
 }
 
 
-pub fn order_chain(ring: [String;3]) -> Option<String> {
+pub fn order_chain(ring: Vec<String>) -> Option<String> {
     //
     // config file loading
     //
