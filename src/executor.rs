@@ -6,10 +6,10 @@ use configparser::ini::Ini;
 pub fn execute_orderchains(config: &Ini){//, symbol: String, price: f64, qty: f64){
 
     let account: Account = Binance::new(
-        Some(config.get("keys", "api_key").unwrap()), 
-        Some(config.get("keys", "secret_key").unwrap()));
+        config.get("keys", "api_key"),
+        config.get("keys", "secret_key"));
 
-    match account.get_balance("BNB") {
+    match account.get_balance("BUSD") {
         Ok(answer) => println!("{:?}", answer),
         Err(e) => {
             println!("{:?}", e);
@@ -17,10 +17,15 @@ pub fn execute_orderchains(config: &Ini){//, symbol: String, price: f64, qty: f6
         },
     }
 
-    match account.get_account() {
-        Ok(answer) => println!("{:?}", answer.balances),
-        Err(e) => println!("{:?}", e),
-    }
+    // match account.get_account() {
+    //     Ok(answer) => println!("{:?}", answer.balances),
+    //     Err(e) => println!("Error: {}", e),
+    // }
+
+    // match account.get_account() {
+    //     Ok(answer) => println!("{:?}", answer.balances),
+    //     Err(e) => println!("{:?}", e),
+    // }
 
     // match account.limit_buy("WTCETH", 10, 0.014000) {
     //     Ok(answer) => println!("{:?}", answer),
