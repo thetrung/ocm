@@ -1,15 +1,19 @@
 use binance::errors::ErrorKind as BinanceLibErrorKind;
 
-pub fn error_handler(e: Err){
-    match e.0 {
-        BinanceLibErrorKind::BinanceError(response) => match response.code {
-            -1000_i16 => println!("An unknown error occured while processing the request.", response.msg),
-            -1001_i16 => println!("Funds insufficient! {}", response.msg),
-            -1002_i16 => println!("Funds insufficient! {}", response.msg),
-            -1003_i16 => println!("TOO_MANY_REQUESTS {}", response.msg),
-            -1002_i16 => println!("Funds insufficient! {}", response.msg),
-            -2010_i16 => println!("Funds insufficient! {}", response.msg),
-            _ => println!("Non-catched code {}: {}", response.code, response.msg)
+// pub fn error_handler<T,E>(e: Result<T,E>){
+//     match e {
+//         BinanceLibErrorKind::BinanceError(response) => match response.code {
+//             -1000_i16 => println!("An unknown error occured while processing the request. {}", response.msg),
+//             -1001_i16 => println!("Funds insufficient! {}", response.msg),
+//             -1002_i16 => println!("Funds insufficient! {}", response.msg),
+//             -1003_i16 => println!("TOO_MANY_REQUESTS {}", response.msg),
+//             -1002_i16 => println!("Funds insufficient! {}", response.msg),
+//             -2010_i16 => println!("Funds insufficient! {}", response.msg),
+//             _ => println!("Non-catched code {}: {}", response.code, response.msg)
+
+//         }
+//     }
+// }
             // -1000 UNKNOWN
     
             //     An unknown error occured while processing the request.
@@ -62,4 +66,3 @@ pub fn error_handler(e: Err){
             // -1022 INVALID_SIGNATURE
     
             //     Signature for this request is not valid.
-}

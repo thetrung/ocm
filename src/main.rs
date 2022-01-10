@@ -2,7 +2,10 @@ extern crate binance;
 
 use configparser::ini::Ini;
 
-mod analyzer;
+// pub mod error;
+pub mod executor;
+pub mod analyzer;
+
 // NOTE:
 //
 // 1. Analyze
@@ -29,6 +32,11 @@ fn main() {
     //
     let mut config = Ini::new();
     let _ = config.load("config.toml");
+
+    // executor::execute_orderchains(&config);
+
+    // return;
+
     let market = analyzer::get_market(&mut config);
     //
     // BUILD RINGS

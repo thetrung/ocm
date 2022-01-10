@@ -1,8 +1,78 @@
+use binance::api::*;
 use binance::account::*;
+use configparser::ini::Ini;
 
-// fn buy_symbol_with_btc<S>(market: Market, account: Account) 
-// where S: Into<String> 
-// {
+
+pub fn execute_orderchains(config: &Ini){//, symbol: String, price: f64, qty: f64){
+
+    let account: Account = Binance::new(
+        Some(config.get("keys", "api_key").unwrap()), 
+        Some(config.get("keys", "secret_key").unwrap()));
+
+    match account.get_balance("BNB") {
+        Ok(answer) => println!("{:?}", answer),
+        Err(e) => {
+            println!("{:?}", e);
+            // error::error_handler(e);
+        },
+    }
+
+    match account.get_account() {
+        Ok(answer) => println!("{:?}", answer.balances),
+        Err(e) => println!("{:?}", e),
+    }
+
+    // match account.limit_buy("WTCETH", 10, 0.014000) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.market_buy("WTCETH", 5) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.limit_sell("WTCETH", 10, 0.035000) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.market_sell("WTCETH", 5) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.custom_order("WTCETH", 9999, 0.0123, "SELL", "LIMIT", "IOC") {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+
+    // let order_id = 1_957_528;
+    // match account.order_status("WTCETH", order_id) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.get_open_orders("WTCETH") {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.cancel_order("WTCETH", order_id) {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+    // match account.cancel_all_open_orders("WTCETH") {
+    //     Ok(answer) => println!("{:?}", answer),
+    //     Err(e) => println!("Error: {:?}", e),
+    // }
+
+}
+
+
+
 //     println!("Which symbol to buy ? ");
 
 //     let mut symbol:String = String::new();
@@ -11,47 +81,4 @@ use binance::account::*;
 //         .ok()
 //         .expect("invalid symbol !");
 
-//     // convert to String to borrow later
-//     let _symbol:String = symbol.into();
-
-//     // Latest price for ONE symbol
-//     match market.get_price(&_symbol) {
-//         Ok(answer) => {
-//             println!("\n- {}: {}", answer.symbol, answer.price);
-//             let current_price = answer.price;
-
-//             // get all BTC 1st 
-//             match account.get_balance("BTC") {
-//                 Ok(answer) => {
-//                     println!("- BTC free: {}", answer.free);
-//                     // "balances": [
-//                     // {
-//                     //     "asset": "BTC",
-//                     //     "free": "4723846.89208129",
-//                     //     "locked": "0.00000000",
-               // },
-//                     let available_btc:f64 = answer.free.parse().unwrap();
-//                     let qty = &available_btc / &current_price;
-//                     //
-//                     // we convert all current BTC into the next coin:
-//                     //
-
-//                     println!("- market_buy {} {}", qty ,_symbol);
-
-//                     // buy all with btc 
-//                     match account.market_buy(&_symbol, qty) {
-//                         Ok(answer) => {
-//                             println!("- success => {:?}\n", answer)
-//                         },
-//                         Err(e) => println!("- ERROR: \n{:?}", e),
-//                     }
-//                 },
-//                 Err(e) => println!("Error: {:?}", e),
-//             }
-//         },
-//         Err(e) => println!("Error: {:?}", e),
-//     }
-
-//     println!("\n");
-// }
 
