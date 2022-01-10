@@ -192,7 +192,7 @@ pub fn init_threads(rings: HashMap<String, Vec<String>>){
     }
 
     // ending
-    println!("Ended all threads.");
+    println!("> RailGun Out.");
 }
 
 pub fn order_chain(symbol: String, ring: Vec<String>) -> Option<String> {
