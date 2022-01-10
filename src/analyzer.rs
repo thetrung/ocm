@@ -141,138 +141,189 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
     return symbols_rings;
 }
 
-pub fn init_threads(rings: HashMap<String, Vec<String>>){
-
-    // CONSTANT
-    const DELAY_INIT: time::Duration = time::Duration::from_millis(100);
-    const DELAY_ROUND: time::Duration = time::Duration::from_millis(1000*5);
+/// All we need is this tickers to divide into ASK+BID table
+/// to cache prices for each symbol before computing profitable chances.
+fn update_orderbooks(
+    market: &Market,
+    symbol_caches: &Vec<String>,
+    tickers_buy: &mut HashMap<String, [f64;2]> , 
+    tickers_sell: &mut HashMap<String, [f64;2]> ){
     //
-    // THREADS
+    // update orderbooks 
     //
-    let mut hunter_pool:Vec<JoinHandle<(Option<String>)>> = vec![];
-
-    for ring in rings {
-        thread::sleep(DELAY_INIT);
-        let thread_ring = ring.1.clone();
-        let thread = thread::spawn(|| { order_chain(ring.0, thread_ring) });
-        hunter_pool.push(thread);
-    }
-    //
-    // Joining all
-    //
-    let mut round_result = vec![];
-    for hunter in hunter_pool{
-        match hunter.join().unwrap() {
-            Some(name) => {
-                // make a list of ring:
-                round_result.push(name);
-                //
-                // Plan :
-                // We may rank the most profit one from each round,
-                // then execute the order ring as fast as possible.
-                // benchmark the delay + order book.
-                //
-                // Analyze > Ranking > Execute > Evaluate > Sleep > Repeat
-                //
-            },
-            None => {
-
+    match market.get_all_book_tickers() {
+        Ok(answer) => {
+            match &answer {
+                binance::model::BookTickers::AllBookTickers(all) => {
+                    match all {
+                        tickers => {
+                            for ticker in tickers {
+                                // println!("{}: ask {} x {} === bid {} x {}", 
+                                // ticker.symbol,    // Symbols
+                                // ticker.ask_price, // Sell orders
+                                // ticker.ask_qty,
+                                // ticker.bid_price, // Buy orders
+                                // ticker.bid_qty);
+                                //
+                                // add only ring symbols
+                                //
+                                if symbol_caches.contains(&ticker.symbol) {
+                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
+                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
+                                    // println!("ticker: {:?}", tickers_sell[&ticker.symbol.clone()]);
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        }
+            // println!("{:?}", &answer);
+        },
+        Err(e) => println!("Error: {}", e),
     }
-    thread::sleep(DELAY_ROUND);
-    //
-    // later, we may use signal to trigger this
-    //
-    println!("> Joining all threads.. <");
-    println!("=== This Round result ===");
-
-    for name in round_result {
-        println!("\"{}\"",name);
-    }
-
-    // ending
-    println!("> RailGun Out.");
+    println!("- total tickers: {}/{} on {} symbols", tickers_sell.len(), tickers_buy.len(),  &symbol_caches.len());
 }
 
-pub fn order_chain(symbol: String, ring: Vec<String>) -> Option<String> {
+pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
     //
-    // config file loading
+    // CONSTANT
     //
-    let mut config = Ini::new();
-    let _ = config.load("config.toml");
-    let market = get_market(&mut config);
-
-    // collect prices vector
-    let mut ring_prices = vec![];
+    const DELAY_INIT: time::Duration = time::Duration::from_millis(1000);
+    // const DELAY_ROUND: time::Duration = time::Duration::from_millis(1000);
     //
-    // collect prices :
+    // THREADPOOL
+    //
+    let mut compute_pool:Vec<JoinHandle<(Option<(String,f64, f64)>)>> = vec![];
+    //
+    // COLLECT ORDERBOOKS
     // 
-    // All we need is this tickers to divide into ASK+BID table
-    // to cache prices for each symbol before computing profitable chances.
-    // 
+    // 1.Init caches 
     //
-    // match market.get_all_book_tickers() {
-    //     Ok(answer) => {
-    //         match &answer {
-    //             binance::model::BookTickers::AllBookTickers(all) => {
-    //                 match all {
-    //                     tickers => {
-    //                         for ticker in tickers {
-    //                             println!("{}: ask {} x {} === bid {} x {}", 
-    //                             ticker.symbol,    // Symbols
-    //                             ticker.ask_price, // Sell orders
-    //                             ticker.ask_qty,
-    //                             ticker.bid_price, // Buy orders
-    //                             ticker.bid_qty);
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //         // println!("{:?}", &answer);
-    //     },
-    //     Err(e) => println!("Error: {}", e),
-    // }
-    for sym in ring {
-        match market.get_price(sym) {
-            Ok(answer) => {
-                // println!("{:?}", answer);
-                ring_prices.push(answer.price);
-            },
-            Err(e) => println!("Error: {}", e),
+    let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
+    let mut tickers_sell: HashMap<String, [f64;2]> = HashMap::new();
+    let mut symbols_cache: Vec<String> = vec![];
+    for ring in &rings {
+        for symbol in ring.1 {
+            symbols_cache.push(symbol.clone());
         }
     }
+    //
+    // 2.Update
+    //
+    update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell);
+    //
+    // INIT 
+    //
+    println!("\n> computing via {} threads..", rings.len());
+    println!("_________________________________________");
+    for ring in rings {
+        // thread::sleep(DELAY_INIT);
+        let symbol = ring.0.clone();
+        let _ring = ring.1.clone();
+
+        // collect ring prices 
+        let mut ring_prices = vec![];
+        ring_prices.push(tickers_buy.get(&_ring[0]).unwrap()[0]);  // BUSD > BRIDGE
+        ring_prices.push(tickers_sell.get(&_ring[1]).unwrap()[0]); // BRIDGE > BRIDGE
+        ring_prices.push(tickers_sell.get(&_ring[2]).unwrap()[0]); // BRIDGE > BUSD
+        // println!("{:?}", ring_prices);
+        
+        // ticker
+        let mut tickers:Vec<[f64;2]> = vec![];
+        tickers.push(tickers_buy.get(&_ring[0]).unwrap().clone());  // BUSD > BRIDGE
+        tickers.push(tickers_sell.get(&_ring[1]).unwrap().clone()); // BRIDGE > BRIDGE
+        tickers.push(tickers_sell.get(&_ring[2]).unwrap().clone()); // BRIDGE > BUSD
+
+        // Quantity :
+        // println!("{:?}", tickers);
+        tickers.sort_by(|[_, b], [_, y]| b.partial_cmp(y).unwrap());
+        // println!("{:?}", tickers);
+        
+        let thread = thread::spawn(|| { order_chain(symbol, ring_prices, tickers) });
+        compute_pool.push(thread);
+    }
+    //
+    // :: COLLECT RESULTS  ::
+    //
+    // [ok] 1. Rank the most profit one from each round, 
+    // [*] 2. Execute the order ring as fast as possible.
+    // [wip] 3. Benchmark the delay
+    //
+    let mut round_result = vec![];
+    for hunter in compute_pool{
+        match hunter.join().unwrap() {
+            Some(result) => round_result.push(result),
+            None => {}
+        }
+    }
+    // wait for all threads..
+    thread::sleep(DELAY_INIT);
+    // println!();
+    println!("_________________________________________\n");
+    //
+    // Sorting Result :
+    //
+    round_result.sort_by(|(_,_,a),(_,_,b)| b.partial_cmp(a).unwrap());
+    println!("\n>-------[ Round {} ]--------",0);
+    println!();
+    for result in round_result {
+        println!("| {:.2}% = ${:.1}\t | {}",result.1, result.2, result.0);
+    }
+    println!("____________________________");
+    // ending
+    println!("\n\n> RailGun Out.\n");
+}
+
+///
+/// Compute profit on each ring 
+/// 
+pub fn order_chain( symbol: String, ring_prices: Vec<f64>, tickers: Vec<[f64;2]> ) -> Option<(String, f64, f64)> {
+    //
     // calculate if it's profitable :
-    let invest = 5000.0; // x15 Max Parallel Executors each round (?)
+    //
+    let max_invest = 5000.0; // x15 Max Parallel Executors each round (?)
+
     let binance_fees = 0.1; // as 0.1 ~ 0.0750% 
     let warning_ratio = 20.0; // 1:20 ratio
     let fees = 1.0 - (binance_fees / 100.0); 
-    let sum = ( invest / ring_prices[0] ) * ring_prices[1] * ring_prices[2];
-    let profit = (sum * fees * fees * fees ) - invest;
-    //
-    // INVALID
-    //
-    if profit > invest / warning_ratio { 
-        println!("{}\n- FINISH -\n\n","WARNING: REMOVE THIS PAIR".red());
-        return None;
-        // return Some(ring_name); // in case, we need to ignore;
-    }
+    let min_invest = tickers[0][0] * tickers[0][1];
+    let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
+    let sum = ( optimal_invest / ring_prices[0] ) * ring_prices[1] * ring_prices[2];
+    let profit = (sum * fees * fees * fees ) - optimal_invest;
+    let percentage = (profit/optimal_invest)*100.0;
     //
     // OK
     //
     if profit > 0.0 {
-
-        println!("{}",
-            format!("ring: {} > {} > {}",
-            ring_prices[0], ring_prices[1], ring_prices[2]).to_string().cyan());
-
-        println!("{} = {} / {:.5}%\n\n", 
-            &symbol.bold(), 
-            (&profit).to_string().green(), 
-            ((&profit/&invest)*100.0).to_string().yellow());
-
-        return Some(symbol);
+        //
+        // ring details
+        //
+        // println!("{}",
+        //     format!("ring: {:?} > {:?} > {:?}",
+        //     ring_prices[0], ring_prices[1], ring_prices[2]).to_string().cyan());
+        //
+        // LOG
+        //
+        let log_profit = format!("{:.5}{} {} ${:.4} max: ${:4.2}\t | {}", 
+        (&percentage).to_string().yellow(),
+        "%".yellow(),
+        "=".bold(),
+        (&profit).to_string().green(), 
+        &optimal_invest,
+        &symbol.bold());
+        //
+        // WARNING: invalid pairs
+        //
+        if profit > optimal_invest / warning_ratio {     
+            println!("\n\n{} - {}\n\n",log_profit, "WARNING: REMOVE THIS PAIR".red());
+            return None;
+            // return Some(ring_name); // in case, we need to ignore;
+        }
+        //
+        // PROFITABLE: normal log
+        //
+        println!("{}", log_profit);
+        return Some((String::from(symbol), percentage, profit));
     }
     
     return None;
@@ -281,7 +332,6 @@ pub fn order_chain(symbol: String, ring: Vec<String>) -> Option<String> {
 //
 // UTILITIES
 //
-
 pub fn get_market(config: &mut Ini) -> Market {
     return Binance::new(
         Some(config.get("keys", "api_key").unwrap()), 

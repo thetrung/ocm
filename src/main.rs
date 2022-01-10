@@ -37,6 +37,6 @@ fn main() {
     //
     // UPDATE PRICES
     //
-    analyzer::init_threads(rings);
+    analyzer::init_threads(&market, rings);
 }
 
