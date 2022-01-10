@@ -1,11 +1,6 @@
 extern crate binance;
 
-use std::{ thread::{self, JoinHandle}, time};
-
-use colored::*;
 use configparser::ini::Ini;
-
-use binance::{api::*, model::{Prices, SymbolPrice}};
 
 mod analyzer;
 // NOTE:
