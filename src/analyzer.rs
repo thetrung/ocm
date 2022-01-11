@@ -28,6 +28,15 @@ use binance::market::*;
 const IS_DEBUG:bool = false;
 const MAX_INVEST:f64 = 368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
+const DELAY_INIT: Duration = Duration::from_millis(2000);
+
+pub struct RingResult {
+    symbol :String,
+    percentage :f64, 
+    profit :f64, 
+    qty :f64, 
+    optimal_invest :f64
+}
 
 // 'a is to fix the damn "named lifetime parameter" to indicate same data flow
 pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Vec<String>>{
@@ -146,8 +155,7 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
 /// All we need is this tickers to divide into ASK+BID table
 /// to cache prices for each symbol before computing profitable chances.
 fn update_orderbooks(
-    market: &Market,
-    symbol_caches: &Vec<String>,
+    market: &Market, symbol_caches: &Vec<String>,
     tickers_buy: &mut HashMap<String, [f64;2]> , 
     tickers_sell: &mut HashMap<String, [f64;2]> ){
     //
@@ -159,21 +167,20 @@ fn update_orderbooks(
                 binance::model::BookTickers::AllBookTickers(all) => {
                     match all {
                         tickers => {
+                            // took 1.4k ~ 521ms to fetch all tickers
                             for ticker in tickers {
+                                // add only ring symbols
+                                if symbol_caches.contains(&ticker.symbol) {
+                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
+                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
+                                    // println!("ticker: {:?}", tickers_sell[&ticker.symbol.clone()]);
+                                }
                                 // println!("{}: ask {} x {} === bid {} x {}", 
                                 // ticker.symbol,    // Symbols
                                 // ticker.ask_price, // Sell orders
                                 // ticker.ask_qty,
                                 // ticker.bid_price, // Buy orders
                                 // ticker.bid_qty);
-                                //
-                                // add only ring symbols
-                                //
-                                if symbol_caches.contains(&ticker.symbol) {
-                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
-                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
-                                    // println!("ticker: {:?}", tickers_sell[&ticker.symbol.clone()]);
-                                }
                             }
                         }
                     }
@@ -190,14 +197,10 @@ fn update_orderbooks(
             }
         }
     }
-    // if IS_DEBUG {
-    //     println!("- total tickers: {}/{} on {} symbols", 
-    //     tickers_sell.len(), tickers_buy.len(),  &symbol_caches.len());
-    // }
 }
 
 /// Compute profit on each ring 
-pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -> Option<(String, f64, f64, f64, f64)> {
+pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -> Option<RingResult> {
     //
     // calculate if it's profitable :
     //
@@ -211,7 +214,6 @@ pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -
         
     let sum = ( optimal_invest / ring_prices[0] ) * ring_prices[1] * ring_prices[2];
     let profit = (sum * fees * fees * fees ) - optimal_invest;
-    
     //
     // OK
     //
@@ -221,9 +223,6 @@ pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -
         // println!("optimal / price {} = {}", symbol ,qty);
         // calculate percentage for ranking :
         let percentage = (profit/optimal_invest)*100.0;
-        
-        // ring details
-        
         //
         // LOG
         //
@@ -242,17 +241,12 @@ pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -
         //
         // PROFITABLE: normal log
         if IS_DEBUG { println!("\n{}\n{}", log_profit, ring_details); }
-        return Some((String::from(symbol), percentage, profit, qty, optimal_invest));
+        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest });
     } 
     return None;
 }
 
 pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
-    //
-    // CONSTANT
-    //
-    const DELAY_INIT: Duration = Duration::from_millis(3000);
-    // const DELAY_ROUND: Duration = Duration::from_millis(1000);
     //
     // 1.Init caches 
     //
@@ -274,19 +268,28 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
         //
         // THREADPOOL
         //
-        let mut compute_pool:Vec<JoinHandle<(Option<(String,f64, f64, f64, f64)>)>> = vec![];
+        let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
         //
         // 2.Update-Compute-Trade Loop :
         //
         let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
         let mut tickers_sell: HashMap<String, [f64;2]> = HashMap::new();
+         
         update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell);
+        //
+        // Check time : 
+        match benchmark.elapsed() {
+            Ok(elapsed) => {
+                println!("{}", format!("\n#{}: updated orderbooks in {} ms",
+                block_count.to_string().yellow(), elapsed.as_millis().to_string().yellow()));
+            }
+            Err(e) => println!("Error: {:?}", e)
+        }
         //
         // INIT 
         //
         if IS_DEBUG {
             println!("\n\n______________[ Round #{} ]______________", block_count);
-            // println!("_________________________________________");
         }
         for ring in &rings {
             let symbol = ring.0.clone();
@@ -329,14 +332,14 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
         }
         //
         // Sort by Profit with optimal investment.
-        round_result.sort_by(|(_,_,a,_,_),(_,_,b,_,_)| b.partial_cmp(a).unwrap());
-        let trade = &round_result[0].clone();
+        round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
+        let trade = &round_result[0];
 
         if IS_DEBUG {
             println!();
             println!("____________________________");
             for result in &round_result {
-                println!("| {:.2}% = ${:.2}    | {}",result.1, result.2, result.0);
+                println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
             }
             println!("____________________________");
         }
@@ -349,10 +352,10 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
                 let fmt = format!("#{}: ${} - trade {} {} by ${} for ${:.5} in {} ms",
                 block_count.to_string().yellow(), 
                 format!("{:.2}", virtual_account).green(),
-                format!("{:.2}", trade.3).green(), 
-                trade.0.green(), 
-                format!("{:.2}", trade.4).green(),
-                format!("{:.2}", trade.2).yellow(), 
+                format!("{:.2}", trade.qty).green(), 
+                trade.symbol.green(), 
+                format!("{:.2}", trade.optimal_invest).green(),
+                format!("{:.2}", trade.profit).yellow(), 
                 elapsed.as_millis().to_string().yellow());
                 println!("{}", fmt);
             }
@@ -360,7 +363,7 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
         }
         // next block.
         block_count += 1;
-        virtual_account += trade.2;
+        virtual_account += trade.profit;
     }
 
     // ending
