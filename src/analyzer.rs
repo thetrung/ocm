@@ -8,6 +8,7 @@ use configparser::ini::Ini;
 
 use binance::errors::ErrorKind as BinanceLibErrorKind;
 use binance::{api::*, model::{Prices, SymbolPrice}};
+use binance::account::*;
 use binance::market::*;
 
 use crate::exchangeinfo::QuantityInfo;
@@ -29,7 +30,7 @@ mod executor;
 // then combine : 1 > 2 > 1
 //
 const IS_DEBUG:bool = false;
-const MAX_INVEST:f64 = 50.0;//368.18;
+const MAX_INVEST:f64 = 20.0;//368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
 const DELAY_INIT: Duration = Duration::from_millis(2000);
 
@@ -245,9 +246,11 @@ pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) 
 
 pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, rings: HashMap<String, Vec<String>>, quantity_info: &HashMap<String, QuantityInfo>){
     //
-    // 1.Init caches 
     //
-
+    //
+    let account: Account = Binance::new(
+        config.get("keys", "api_key"),
+        config.get("keys", "secret_key"));
     if IS_DEBUG { println!("\n> computing via {} threads..", &rings.len());}
     let mut virtual_account = MAX_INVEST;
     let mut block_count = 0;
@@ -336,15 +339,15 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
         // - symB x priceB x qtyB
         // - symC x priceC x qtyC
         let final_ring = &rings[&trade.symbol];
-        println!("> final ring: {:?}", final_ring);
+        println!("> final: {:?}", final_ring);
         let p1 = tickers_buy.get(&final_ring[0]).unwrap()[0];
         let p2 = tickers_sell.get(&final_ring[1]).unwrap()[0];
         let p3 = tickers_sell.get(&final_ring[2]).unwrap()[0];
         let final_ring_prices:Vec<f64> = vec![p1, p2, p3];
-        println!("> buy {:?} > sell {:?} > sell {:?}", p1, p2, p3);
+        println!("> final: buy {:?} > sell {:?} > sell {:?}", p1, p2, p3);
 
         // 2. send it > executor
-        executor::execute_final_ring(&config, final_ring, &final_ring_prices, trade.optimal_invest, quantity_info);
+        executor::execute_final_ring(&account, final_ring, &final_ring_prices, trade.optimal_invest, quantity_info);
 
         // 3. wait for trade finish
         // 4. evaluate profit

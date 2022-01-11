@@ -70,11 +70,11 @@ struct Symbol {
 
 #[derive(Serialize, Deserialize)]
 pub struct QuantityInfo {
-    symbol	: String,       // pair symbol
-    minQty: String,         // min qty -> qty cap
-    maxQty: String,         // max qty -> qty cap
-    stepSize: String,       // decimal -> qty cap
-    stepSizeDecimal: i32,   // we pre-calculate here 
+    pub symbol	: String,       // pair symbol
+    pub minQty: String,         // min qty -> qty cap
+    pub maxQty: String,         // max qty -> qty cap
+    pub stepSize: String,       // decimal -> qty cap
+    pub stepSizeDecimal: i32,   // we pre-calculate here 
 }
 
 const QUANTITY_INFO_FILE:&str = "quantity.cache";
