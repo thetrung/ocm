@@ -157,7 +157,7 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
 fn update_orderbooks(
     market: &Market, symbol_caches: &Vec<String>,
     tickers_buy: &mut HashMap<String, [f64;2]> , 
-    tickers_sell: &mut HashMap<String, [f64;2]> ){
+    tickers_sell: &mut HashMap<String, [f64;2]> ) -> bool {
     //
     // update orderbooks 
     //
@@ -185,18 +185,12 @@ fn update_orderbooks(
                         }
                     }
                 }
-            }
+            };
+            return true;
         },
-        Err(e) => {
-            println!("Error: {}", &e);
-            match e.0 {
-                BinanceLibErrorKind::BinanceError(response) => match response.code {
-                    _ => println!("Non-catched code {}: {}", response.code, response.msg)
-                }
-                _ => {}
-            }
-        }
-    }
+        Err(e) => println!("Error: {:?}\n\n> will break the loop now.\n> RailGun out.", &e.0)
+    };
+    return false;
 }
 
 /// Compute profit on each ring 
@@ -275,15 +269,17 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
         let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
         let mut tickers_sell: HashMap<String, [f64;2]> = HashMap::new();
          
-        update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell);
-        //
-        // Check time : 
-        match benchmark.elapsed() {
-            Ok(elapsed) => {
-                println!("{}", format!("\n#{}: updated orderbooks in {} ms",
-                block_count.to_string().yellow(), elapsed.as_millis().to_string().yellow()));
-            }
-            Err(e) => println!("Error: {:?}", e)
+        match update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell) {
+            true => { // Check time : 
+                match benchmark.elapsed() {
+                    Ok(elapsed) => {
+                        println!("{}", format!("\n#{}: updated orderbooks in {} ms",
+                        block_count.to_string().yellow(), elapsed.as_millis().to_string().yellow()));
+                    }
+                    Err(e) => println!("> can't benchmark update_orderbooks: {:?}", e)
+                }
+            },
+            false => return // break the loop.
         }
         //
         // INIT 
