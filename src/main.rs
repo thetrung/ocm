@@ -2,8 +2,7 @@ extern crate binance;
 
 use configparser::ini::Ini;
 
-// pub mod error;
-pub mod executor;
+pub mod exchangeinfo;
 pub mod analyzer;
 
 // NOTE:
@@ -32,18 +31,26 @@ fn main() {
     //
     let mut config = Ini::new();
     let _ = config.load("config.toml");
-
-    // executor::execute_orderchains(&config);
-    // return;
-
     let market = analyzer::get_market(&mut config);
     //
     // BUILD RINGS
     //
     let rings = analyzer::symbol_discovery(&config, &market);
+    let symbols_cache = make_symcache(&rings);
+    let quantity_info = exchangeinfo::fetch(&symbols_cache).unwrap();
+    // return;
     //
     // UPDATE PRICES
     //
-    analyzer::init_threads(&market, rings);
+    analyzer::init_threads(&config, &market, &symbols_cache, rings, &quantity_info);
 }
 
+fn make_symcache(rings: &std::collections::HashMap<String, Vec<String>>) -> Vec<String> {
+    let mut symbols_cache: Vec<String> = vec![];
+    for ring in rings {
+        for symbol in ring.1 {
+            symbols_cache.push(symbol.clone());
+        }
+    }
+    return symbols_cache;
+}

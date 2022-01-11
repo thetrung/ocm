@@ -10,6 +10,9 @@ use binance::errors::ErrorKind as BinanceLibErrorKind;
 use binance::{api::*, model::{Prices, SymbolPrice}};
 use binance::market::*;
 
+use crate::exchangeinfo::QuantityInfo;
+
+mod executor;
 // TODO:
 // - Save discovered pairs to a cache file
 // - Only re-run cache if no cache file is found, or forced update.
@@ -26,7 +29,7 @@ use binance::market::*;
 // then combine : 1 > 2 > 1
 //
 const IS_DEBUG:bool = false;
-const MAX_INVEST:f64 = 368.18;
+const MAX_INVEST:f64 = 50.0;//368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
 const DELAY_INIT: Duration = Duration::from_millis(2000);
 
@@ -141,7 +144,7 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
                     sym.0.as_str(), 
                     Option::from(sym.1.join(",")));
             }
-            match cache_file.write("symbols.cache") {
+            match cache_file.write(SYMBOL_CACHE_FILE) {
                 Ok(_) => println!("> built symbols cache."),
                 msg => println!("Error saving cache: {:?}", msg)
             }
@@ -194,7 +197,7 @@ fn update_orderbooks(
 }
 
 /// Compute profit on each ring 
-pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -> Option<RingResult> {
+pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -> Option<RingResult> {
     //
     // calculate if it's profitable :
     //
@@ -240,16 +243,11 @@ pub fn order_chain( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -
     return None;
 }
 
-pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
+pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, rings: HashMap<String, Vec<String>>, quantity_info: &HashMap<String, QuantityInfo>){
     //
     // 1.Init caches 
     //
-    let mut symbols_cache: Vec<String> = vec![];
-    for ring in &rings {
-        for symbol in ring.1 {
-            symbols_cache.push(symbol.clone());
-        }
-    }
+
     if IS_DEBUG { println!("\n> computing via {} threads..", &rings.len());}
     let mut virtual_account = MAX_INVEST;
     let mut block_count = 0;
@@ -312,7 +310,7 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
             compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
 
             // spawn computation          
-            let thread = thread::spawn(|| { order_chain(symbol, ring_prices, compute_min_volume) });
+            let thread = thread::spawn(|| { analyze_ring(symbol, ring_prices, compute_min_volume) });
             compute_pool.push(thread);
         }
         //
@@ -331,6 +329,27 @@ pub fn init_threads(market: &Market, rings: HashMap<String, Vec<String>>){
         round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
         let trade = &round_result[0];
 
+        //
+        // Here is what we need to do :
+        // 1. build final ring data
+        // - symA x priceA x qtyA
+        // - symB x priceB x qtyB
+        // - symC x priceC x qtyC
+        let final_ring = &rings[&trade.symbol];
+        println!("> final ring: {:?}", final_ring);
+        let p1 = tickers_buy.get(&final_ring[0]).unwrap()[0];
+        let p2 = tickers_sell.get(&final_ring[1]).unwrap()[0];
+        let p3 = tickers_sell.get(&final_ring[2]).unwrap()[0];
+        let final_ring_prices:Vec<f64> = vec![p1, p2, p3];
+        println!("> buy {:?} > sell {:?} > sell {:?}", p1, p2, p3);
+
+        // 2. send it > executor
+        executor::execute_final_ring(&config, final_ring, &final_ring_prices, trade.optimal_invest, quantity_info);
+
+        // 3. wait for trade finish
+        // 4. evaluate profit
+        // 5. next block !
+        //
         if IS_DEBUG {
             println!();
             println!("____________________________");
