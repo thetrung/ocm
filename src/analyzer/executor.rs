@@ -19,7 +19,7 @@ const POLLING_ORDER: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
 fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str) -> bool {
-    println!("> new order_id {:?} for {} {}", &order_id.to_string().yellow(), qty.to_string().green(), &symbol.green());
+    println!("> new order_id {} for {} {}", &order_id.to_string().yellow(), qty.to_string().green(), &symbol.green());
     loop {
         thread::sleep(POLLING_ORDER);
 
@@ -53,9 +53,8 @@ fn get_balance(account: &Account, symbol: &str) -> Option<f64>{
 
 /// Execute best ring found in previous round result.
 pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
-    final_ring: &Vec<String>, prices: &Vec<f64>, 
-    optimal_invest: f64, 
-    quantity_info: &HashMap<String, QuantityInfo>){
+    final_ring: &Vec<String>, prices: &Vec<f64>, optimal_invest: f64, 
+    quantity_info: &HashMap<String, QuantityInfo>) -> Option<f64> {
     //
     // Buy > Sell > Sell
     //
@@ -67,8 +66,8 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     let buy_qty = optimal_invest/prices[0] * fees;
     let qty_first_buy = f64::trunc(buy_qty  * move_decimal) / move_decimal;
     
-    println!("> qty: {} => {} as {} has only {} decimals.", 
-    buy_qty, qty_first_buy, quantity_info[&final_ring[0]].stepSize ,decimal_place);
+    // println!("> qty: {} => {} as {} has only {} decimals.", 
+    // buy_qty, qty_first_buy, quantity_info[&final_ring[0]].stepSize ,decimal_place);
     // return;
 
     //
@@ -92,9 +91,11 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[0]),
         Err(e) => println!("Error: {:?}", e),
     }
-    balance_qty = get_balance(&account, &ring_component.symbol).unwrap();
-    if order_result { println!("executed LIMIT_BUY {:?} {}", balance_qty, &final_ring[0]) }
-    else { return }
+    if order_result { 
+        balance_qty = get_balance(&account, &ring_component.symbol).unwrap();
+        println!("executed LIMIT_BUY {:?} {}", balance_qty, &final_ring[0]);
+    }
+    else { return None }
     
     //
     // 2. Sell OOKI-BNB
@@ -104,9 +105,11 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[1]),
         Err(e) => println!("Error: {:?}", e),
     }
-    balance_qty = get_balance(&account, &ring_component.bridge).unwrap();
-    if order_result { println!("executed LIMIT_SELL {:?} {}", balance_qty, &final_ring[1]) }
-    else { return }
+    if order_result { 
+        balance_qty = get_balance(&account, &ring_component.bridge).unwrap();
+        println!("executed LIMIT_SELL {:?} {}", balance_qty, &final_ring[1]);
+    }
+    else { return None }
 
     //
     // 3. Sell BNB-BUSD
@@ -116,9 +119,13 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[2]),
         Err(e) => println!("Error: {:?}", e),
     }
-    balance_qty = get_balance(&account, &ring_component.stablecoin).unwrap();
-    if order_result { println!("executed LIMIT_SELL {:?} {}", balance_qty, &final_ring[2]) }
-    else { return }
+    if order_result { 
+        balance_qty = get_balance(&account, &ring_component.stablecoin).unwrap();
+        println!("executed LIMIT_SELL {:?} {}", balance_qty, &final_ring[2]); 
+    }
+    else { return None }
+
+    return Some(balance_qty);
 }
 
 

@@ -364,7 +364,14 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
             // Sort by Profit 
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
             let trade = &round_result[0];
-
+            if IS_DEBUG {
+                println!();
+                println!("____________________________");
+                for result in &round_result {
+                    println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
+                }
+                println!("____________________________");
+            }
             // Build ring prices
             let final_ring = &rings[&trade.symbol];
             let ring_prices:Vec<f64> = build_ring(final_ring, &tickers_buy, &tickers_sell);
@@ -375,21 +382,15 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
             // 2. send it > executor
             ring_component.symbol = trade.symbol.clone(); 
             println!("> ring: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-            executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+            let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
             // 3. wait for trade finish
             // 4. evaluate profit
-            // 5. next block !
+            match new_balance {
+                Some(balance) => virtual_account = balance,
+                None => {}
+            } 
             //
-            if IS_DEBUG {
-                println!();
-                println!("____________________________");
-                for result in &round_result {
-                    println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
-                }
-                println!("____________________________");
-            }
-            //
-            // Get Total Time for 1 round 
+            // benchmark every block 
             //
             match benchmark.elapsed() {
                 Ok(elapsed) => {
@@ -406,9 +407,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
                 }
                 Err(e) => println!("Error: {:?}", e)
             }
-            virtual_account += trade.profit;
         }
-        // next block.
+        //5. next block !
         block_count += 1;
     }
     // ending
