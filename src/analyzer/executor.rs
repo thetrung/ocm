@@ -21,6 +21,9 @@ const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 // We may setup a wait time so the bot auto cancel order if waited too long,
 // then it can auto-market sell the asset and reboot the loop, but this come at cost of fund loss.
 //
+// 1. We may need to refresh tickers during polling, 
+// in case, price gap is too big, we need to cancel order + market sell. 
+//
 
 /// Poll and Wait until an order is filled.
 fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str) -> bool {
@@ -69,8 +72,8 @@ fn correct_lots_qty(final_ring: &Vec<String>, prices: &Vec<f64>,
     let buy_qty = optimal_invest/prices[0] * fees;
     let qty_first_buy = f64::trunc(buy_qty  * move_decimal) / move_decimal;
     
-    println!("> qty: {} => {} as {} has only {} decimals.", 
-    buy_qty, qty_first_buy, quantity_info[&final_ring[0]].stepSize ,decimal_place);
+    // println!("> qty: {} => {} as {} has only {} decimals.", 
+    // buy_qty, qty_first_buy, quantity_info[&final_ring[0]].stepSize ,decimal_place);
     return qty_first_buy;
 }
 
@@ -85,7 +88,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     let optimal_invest = if config_invest > _current_balance { _current_balance } else { config_invest };
     let mut balance_qty:f64 = correct_lots_qty(final_ring, prices, optimal_invest, quantity_info);
     // for testing purpose.
-    return None;
+    // return None;
     //
     // 1. Buy OOKI-BUSD
     //
