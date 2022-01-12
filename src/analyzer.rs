@@ -313,7 +313,7 @@ fn compute_rings(tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<
             None => {}
         }
     }
-    println!("> result: {} profitable rings", round_result.len());
+    if IS_DEBUG { println!("> result: {} profitable rings", round_result.len()); }
     return round_result;
 }
 
@@ -376,8 +376,9 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
             let final_ring = &rings[&trade.symbol];
             let ring_prices:Vec<f64> = build_ring(final_ring, &tickers_buy, &tickers_sell);
 
-            println!("> best: {:?}", final_ring);
-            println!("> best: buy {:?} > sell {:?} > sell {:?}", ring_prices[0], ring_prices[1], ring_prices[2]);
+            if IS_DEBUG { 
+                println!("> best: {:?}", final_ring);
+                println!("> best: buy {:?} > sell {:?} > sell {:?}", ring_prices[0], ring_prices[1], ring_prices[2]); }
 
             // 2. send it > executor
             ring_component.symbol = trade.symbol.clone(); 
