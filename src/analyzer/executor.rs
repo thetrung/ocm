@@ -1,7 +1,10 @@
+
+use colored::*;
+use configparser::ini::Ini;
+
 use binance::api::*;
 use binance::account::*;
 use binance::model::Transaction;
-use configparser::ini::Ini;
 
 use std::{
     collections::HashMap,
@@ -16,7 +19,7 @@ const POLLING_ORDER: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
 fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str) -> bool {
-    println!("> new order_id {:?} for {} {}", &order_id, qty, &symbol);
+    println!("> new order_id {:?} for {} {}", &order_id.to_string().yellow(), qty.to_string().green(), &symbol.green());
     loop {
         thread::sleep(POLLING_ORDER);
 
@@ -24,11 +27,11 @@ fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str) -> bo
             Ok(answer) => {
                 match answer.status.as_str() {
                     "FILLED" => {
-                        println!("> executed qty: {}", answer.executed_qty);
+                        println!("> executed qty: {}", answer.executed_qty.green());
                         return true;
                     },  // can move on next symbol
                     "CANCELED" => return false, // on purpose ;) move to next round ?
-                    _ => print!(".")//println!("> {} {} is {:?}", qty, &symbol ,answer.status)
+                    _ => {}//println!("> {} {} is {:?}", qty, &symbol ,answer.status)
                 }
             },
             Err(e) => println!("Error: {:?}", e),
@@ -79,14 +82,14 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 4. Execute next order by that
     // 5. Repeat the whole ring
     //
-    let mut balance_qty:f64 = 0.0;
     let mut order_result = false;
+    let mut balance_qty:f64 = qty_first_buy;
     //
     // 1. Buy OOKI-BUSD
     //
-    println!(">LIMIT_BUY {} {} {}", &final_ring[0], &qty_first_buy, &prices[0]);
-    match account.limit_buy(&final_ring[0], qty_first_buy, prices[0]) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, qty_first_buy, &final_ring[0]),
+    println!("> LIMIT_BUY {} {} at {}", &balance_qty.to_string().green(), &final_ring[0].green(), &prices[0].to_string().yellow());
+    match account.limit_buy(&final_ring[0], balance_qty, prices[0]) {
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[0]),
         Err(e) => println!("Error: {:?}", e),
     }
     balance_qty = get_balance(&account, &ring_component.symbol).unwrap();
@@ -96,7 +99,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     //
     // 2. Sell OOKI-BNB
     //
-    println!(">LIMIT_SELL {} {} {}", &final_ring[1], &balance_qty, &prices[1]);
+    println!(">LIMIT_SELL {} {} at {}", &balance_qty.to_string().green(), &final_ring[1].green(), &prices[1].to_string().yellow());
     match account.limit_sell(&final_ring[1], balance_qty, prices[1]) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[1]),
         Err(e) => println!("Error: {:?}", e),
@@ -108,7 +111,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     //
     // 3. Sell BNB-BUSD
     //
-    println!(">LIMIT_SELL {} {} {}", &final_ring[2], &balance_qty, &prices[2]);
+    println!(">LIMIT_SELL {} {} at {}", &balance_qty.to_string().green(), &final_ring[2].green(), &prices[2].to_string().yellow());
     match account.limit_sell(&final_ring[2], balance_qty, prices[2]) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[2]),
         Err(e) => println!("Error: {:?}", e),
