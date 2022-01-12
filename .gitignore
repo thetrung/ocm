@@ -3,3 +3,4 @@
 config.toml
 .DS_Store
 *.cache
+Cargo.lock

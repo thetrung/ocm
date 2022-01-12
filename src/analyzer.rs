@@ -10,6 +10,7 @@ use binance::errors::ErrorKind as BinanceLibErrorKind;
 use binance::{api::*, model::{Prices, SymbolPrice}};
 use binance::account::*;
 use binance::market::*;
+use binance::config::*;
 
 use crate::exchangeinfo::QuantityInfo;
 
@@ -30,7 +31,7 @@ mod executor;
 // then combine : 1 > 2 > 1
 //
 const IS_DEBUG:bool = false;
-const MAX_INVEST:f64 = 20.0;//368.18;
+const MAX_INVEST:f64 = 50.0;//368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
 const DELAY_INIT: Duration = Duration::from_millis(2000);
 
@@ -40,6 +41,12 @@ pub struct RingResult {
     profit :f64, 
     qty :f64, 
     optimal_invest :f64
+}
+
+pub struct RingComponent {
+    symbol: String,
+    bridge: String,
+    stablecoin: String
 }
 
 // 'a is to fix the damn "named lifetime parameter" to indicate same data flow
@@ -179,12 +186,14 @@ fn update_orderbooks(
                                     tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
                                     // println!("ticker: {:?}", tickers_sell[&ticker.symbol.clone()]);
                                 }
-                                // println!("{}: ask {} x {} === bid {} x {}", 
-                                // ticker.symbol,    // Symbols
-                                // ticker.ask_price, // Sell orders
-                                // ticker.ask_qty,
-                                // ticker.bid_price, // Buy orders
-                                // ticker.bid_qty);
+                                // if IS_DEBUG {
+                                //     println!("{}: ask {} x {} === bid {} x {}", 
+                                //     ticker.symbol,    // Symbols
+                                //     ticker.ask_price, // Sell orders
+                                //     ticker.ask_qty,
+                                //     ticker.bid_price, // Buy orders
+                                //     ticker.bid_qty);
+                                // }
                             }
                         }
                     }
@@ -198,7 +207,46 @@ fn update_orderbooks(
 }
 
 /// Compute profit on each ring 
-pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) -> Option<RingResult> {
+pub fn analyze_ring( symbol: String, _ring: Vec<String>, 
+    tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
+    //
+    // IMPORTANT: 
+    // we try to buy the best bid/ask but it really depends on strategy here.
+    // reverse this behaviour and the profit trade is different.
+    // if we use orderbook of sell/buy/buy for BUY-SELL-SELL sequence,
+    // there will be almost no chance to gain profit, because :
+    // - sell : will be lowest but higher than average price
+    // - buy : will be highiest but lower than average price
+    // So, if we BUY the lowest ask, we will still buy higher than ave price
+    // and same to SELL the highiest bid, we still sell lower than ave price.
+    //
+    // * That's reason why we can't use sell/buy/buy sequence for computing profit.
+    //
+    // Other strategy, is certainly, we buy lowest bid, and sell highiest ask :
+    // - buy : with the lowiest bid, but lower than ave price
+    // - sell : with the highiest ask, but higher than ave price
+    // By using LIMIT order, it take longer time than market order, but safer for fund,
+    // and avoid loss.
+    //
+    let p1 = tickers_buy.get(&_ring[0]).unwrap();
+    let p2 = tickers_sell.get(&_ring[1]).unwrap();
+    let p3 = tickers_sell.get(&_ring[2]).unwrap();
+
+    // collect ring prices 
+    let ring_prices = vec![
+        p1[0],  // BUSD > BRIDGE
+        p2[0],  // BRIDGE > BRIDGE
+        p3[0]   // BRIDGE > BUSD
+    ];
+    
+    // calculate min volume 
+    let mut compute_min_volume = // * in stablecoin
+    vec![p1[0]*p1[1],       // priceA x qtyA
+        p2[0]*p2[1]*p3[0],  // priceB x priceC x qtyB
+        p3[0]*p3[1]];       // priceC x qtyC
+
+    // Sorting price x qty 
+    compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
     //
     // calculate if it's profitable :
     //
@@ -207,7 +255,7 @@ pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) 
     let fees = 1.0 - (binance_fees / 100.0); 
 
     let max_invest = MAX_INVEST; // note : 1 round = { 3 trades + 1 request } per second is goal.
-    let min_volume = volumes[0]; // already sorted [ min -> max ]
+    let min_volume = compute_min_volume[0]; // already sorted [ min -> max ]
     let optimal_invest = if min_volume > max_invest { max_invest } else { min_volume };
         
     let sum = ( optimal_invest / ring_prices[0] ) * ring_prices[1] * ring_prices[2];
@@ -216,11 +264,8 @@ pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) 
     // OK
     //
     if profit > 0.0 {
-        // the quantity we will trade ?
-        let qty = optimal_invest / ring_prices[0];
-        // println!("optimal / price {} = {}", symbol ,qty);
-        // calculate percentage for ranking :
-        let percentage = (profit/optimal_invest)*100.0;
+        let qty = optimal_invest / ring_prices[0];          // println!("optimal / price {} = {}", symbol ,qty);
+        let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         //
         // LOG
         //
@@ -239,37 +284,62 @@ pub fn analyze_ring( symbol: String, ring_prices: Vec<f64>, volumes: Vec<f64> ) 
         //
         // PROFITABLE: normal log
         if IS_DEBUG { println!("\n{}\n{}", log_profit, ring_details); }
-        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest });
-    } 
+        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
+    }
     return None;
+}
+
+fn compute_rings(tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>,
+    rings: &HashMap<String, Vec<String>> ) -> Vec<RingResult>{
+    //
+    // THREADPOOL
+    //
+    let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
+
+    for ring in rings {
+        // copying data :
+        let symbol = ring.0.clone(); // coin name
+        let _ring = ring.1.clone();  // ring of pairs
+        let _tickers_buy = tickers_buy.clone();
+        let _tickers_sell = tickers_sell.clone();
+        // spawn computation          
+        let thread = thread::spawn(|| { analyze_ring(symbol, _ring, _tickers_buy, _tickers_sell) });
+        compute_pool.push(thread);
+    }
+    let mut round_result = vec![];
+    for computer in compute_pool {
+        match computer.join().unwrap() {
+            Some(result) => round_result.push(result),
+            None => {}
+        }
+    }
+    println!("> result: {} profitable rings", round_result.len());
+    return round_result;
 }
 
 pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, rings: HashMap<String, Vec<String>>, quantity_info: &HashMap<String, QuantityInfo>){
     //
-    //
-    //
-    let account: Account = Binance::new(
-        config.get("keys", "api_key"),
-        config.get("keys", "secret_key"));
-    if IS_DEBUG { println!("\n> computing via {} threads..", &rings.len());}
+    // ACCOUNT
+    let account = get_account(config);
     let mut virtual_account = MAX_INVEST;
+    //
+    // RING COMPONENTS
+    let _config_bridges = &config.get("symbols", "bridges").unwrap();
+    let config_bridges:Vec<&str> = _config_bridges.split(',').collect();
+    let mut ring_component = RingComponent {
+        symbol: String::from(""),
+        bridge: String::from(config_bridges[1]),
+        stablecoin: String::from(config_bridges[0]) 
+    };
+    //
+    // BLOCK COUNT
+    //
     let mut block_count = 0;
     loop {
-        //
-        // BLOCK-TIME
-        //
-        thread::sleep(DELAY_INIT);
-        let benchmark = SystemTime::now();
-        //
-        // THREADPOOL
-        //
-        let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
-        //
-        // 2.Update-Compute-Trade Loop :
-        //
+        thread::sleep(DELAY_INIT);          // BLOCK-TIME
+        let benchmark = SystemTime::now();  // BENCHMARK
         let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
         let mut tickers_sell: HashMap<String, [f64;2]> = HashMap::new();
-         
         match update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell) {
             true => { // Check time : 
                 match benchmark.elapsed() {
@@ -282,108 +352,65 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
             },
             false => return // break the loop.
         }
-        //
-        // INIT 
-        //
         if IS_DEBUG {
             println!("\n\n______________[ Round #{} ]______________", block_count);
         }
-        for ring in &rings {
-            let symbol = ring.0.clone();
-            let _ring = ring.1;
+        // Get computed result 
+        let mut round_result = compute_rings(&tickers_buy, &tickers_sell, &rings);
+        
+        // If there's profitable ring 
+        if round_result.len() > 0 {
 
-            let p1 = tickers_buy.get(&_ring[0]).unwrap();
-            let p2 = tickers_sell.get(&_ring[1]).unwrap();
-            let p3 = tickers_sell.get(&_ring[2]).unwrap();
+            // Sort by Profit 
+            round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
+            let trade = &round_result[0];
 
-            // collect ring prices 
-            let mut ring_prices = vec![];
-            ring_prices.push(p1[0]);  // BUSD > BRIDGE
-            ring_prices.push(p2[0]); // BRIDGE > BRIDGE
-            ring_prices.push(p3[0]); // BRIDGE > BUSD
-            // println!("{:?}", ring_prices);
-            
-            // calculate min volume 
-            let mut compute_min_volume = // * in stablecoin
-            vec![p1[0]*p1[1],       // priceA x qtyA
-                p2[0]*p2[1]*p3[0],  // priceB x priceC x qtyB
-                p3[0]*p3[1]];       // priceC x qtyC
+            // Build ring prices
+            let final_ring = &rings[&trade.symbol];
+            let ring_prices:Vec<f64> = build_ring(final_ring, &tickers_buy, &tickers_sell);
 
-            // Sorting price x qty 
-            compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
+            println!("> best: {:?}", final_ring);
+            println!("> best: buy {:?} > sell {:?} > sell {:?}", ring_prices[0], ring_prices[1], ring_prices[2]);
 
-            // spawn computation          
-            let thread = thread::spawn(|| { analyze_ring(symbol, ring_prices, compute_min_volume) });
-            compute_pool.push(thread);
-        }
-        //
-        // :: COLLECT RESULTS  ::
-        // [*] 2. Execute the order ring as fast as possible.
-        //
-        let mut round_result = vec![];
-        for computer in compute_pool {
-            match computer.join().unwrap() {
-                Some(result) => round_result.push(result),
-                None => {}
+            // 2. send it > executor
+            ring_component.symbol = trade.symbol.clone(); 
+            println!("> ring: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
+            executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+            // 3. wait for trade finish
+            // 4. evaluate profit
+            // 5. next block !
+            //
+            if IS_DEBUG {
+                println!();
+                println!("____________________________");
+                for result in &round_result {
+                    println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
+                }
+                println!("____________________________");
             }
-        }
-        //
-        // Sort by Profit with optimal investment.
-        round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
-        let trade = &round_result[0];
-
-        //
-        // Here is what we need to do :
-        // 1. build final ring data
-        // - symA x priceA x qtyA
-        // - symB x priceB x qtyB
-        // - symC x priceC x qtyC
-        let final_ring = &rings[&trade.symbol];
-        println!("> final: {:?}", final_ring);
-        let p1 = tickers_buy.get(&final_ring[0]).unwrap()[0];
-        let p2 = tickers_sell.get(&final_ring[1]).unwrap()[0];
-        let p3 = tickers_sell.get(&final_ring[2]).unwrap()[0];
-        let final_ring_prices:Vec<f64> = vec![p1, p2, p3];
-        println!("> final: buy {:?} > sell {:?} > sell {:?}", p1, p2, p3);
-
-        // 2. send it > executor
-        executor::execute_final_ring(&account, final_ring, &final_ring_prices, trade.optimal_invest, quantity_info);
-
-        // 3. wait for trade finish
-        // 4. evaluate profit
-        // 5. next block !
-        //
-        if IS_DEBUG {
-            println!();
-            println!("____________________________");
-            for result in &round_result {
-                println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
+            //
+            // Get Total Time for 1 round 
+            //
+            match benchmark.elapsed() {
+                Ok(elapsed) => {
+                    // println!("{:?}", &traded_volume_cache);
+                    let fmt = format!("#{}: ${} - trade {} {} by ${} for ${:.5} in {} ms",
+                    block_count.to_string().yellow(), 
+                    format!("{:.2}", virtual_account).green(),
+                    format!("{:.2}", trade.qty).green(), 
+                    trade.symbol.green(), 
+                    format!("{:.2}", trade.optimal_invest).green(),
+                    format!("{:.2}", trade.profit).yellow(), 
+                    elapsed.as_millis().to_string().yellow());
+                    println!("{}", fmt);
+                }
+                Err(e) => println!("Error: {:?}", e)
             }
-            println!("____________________________");
-        }
-        //
-        // Get Total Time for 1 round 
-        //
-        match benchmark.elapsed() {
-            Ok(elapsed) => {
-                // println!("{:?}", &traded_volume_cache);
-                let fmt = format!("#{}: ${} - trade {} {} by ${} for ${:.5} in {} ms",
-                block_count.to_string().yellow(), 
-                format!("{:.2}", virtual_account).green(),
-                format!("{:.2}", trade.qty).green(), 
-                trade.symbol.green(), 
-                format!("{:.2}", trade.optimal_invest).green(),
-                format!("{:.2}", trade.profit).yellow(), 
-                elapsed.as_millis().to_string().yellow());
-                println!("{}", fmt);
-            }
-            Err(e) => println!("Error: {:?}", e)
+            virtual_account += trade.profit;
         }
         // next block.
         block_count += 1;
-        virtual_account += trade.profit;
     }
-
     // ending
     println!("\n> RailGun Out.\n");
 }
@@ -391,8 +418,27 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
 //
 // UTILITIES
 //
+
+/// Build buy-sell-sell prices for a loopring.
+fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<f64>{
+    let p1 = tickers_buy.get(&ring[0]).unwrap()[0]; // LIMIT_BUY
+    let p2 = tickers_sell.get(&ring[1]).unwrap()[0]; // LIMIT_SELL
+    let p3 = tickers_sell.get(&ring[2]).unwrap()[0]; // LIMIT_SELL
+    return vec![p1, p2, p3];
+}
+
 pub fn get_market(config: &mut Ini) -> Market {
-    return Binance::new(
+    let mainnet = Config::default();//.set_rest_api_endpoint("https://testnet.binance.vision");
+    return Binance::new_with_config(
         Some(config.get("keys", "api_key").unwrap()), 
-        Some(config.get("keys", "secret_key").unwrap()));
+        Some(config.get("keys", "secret_key").unwrap()),
+        &mainnet);
+}
+
+pub fn get_account(config: &Ini) -> Account {
+    let mainnet = Config::default();//.set_rest_api_endpoint("https://testnet.binance.vision");
+    return Binance::new_with_config(
+        Some(config.get("keys", "api_key").unwrap()), 
+        Some(config.get("keys", "secret_key").unwrap()),
+        &mainnet);
 }
