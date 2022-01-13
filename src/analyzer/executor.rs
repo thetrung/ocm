@@ -15,6 +15,8 @@ use std::{
 use crate::exchangeinfo::QuantityInfo;
 use crate::analyzer::RingComponent;
 
+/// counting before dropping an ongoing order.
+const DROP_ORDER:i32 = 1;
 /// Wait time between orders
 const POLLING_ORDER: Duration = Duration::from_millis(250);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
@@ -32,7 +34,7 @@ fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str, is_1s
                         return Some(answer.executed_qty.parse::<f64>().unwrap());
                     },  // can move on next symbol
                     "CANCELED" => return None, // on purpose ;) move to next round ?
-                    "NEW" => if polling_count > 0 && is_1st_order { 
+                    "NEW" => if polling_count > DROP_ORDER && is_1st_order { 
                         match account.cancel_order(symbol, order_id){
                             Ok(_) => { 
                                 println!("> cancelled #{} after {} polls.", order_id.to_string().yellow(), polling_count);
