@@ -188,10 +188,10 @@ fn update_orderbooks(
                                     let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
                                     let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
                                     
-                                    println!("{}: old {}/{} => new_bid/ask {}/{}",
-                                    ticker.symbol,
-                                    &ticker.bid_price, &ticker.ask_price,
-                                    new_bid_price, new_ask_price );
+                                    // println!("{}: old {}/{} => new_bid/ask {}/{}",
+                                    // ticker.symbol,
+                                    // &ticker.bid_price, &ticker.ask_price,
+                                    // new_bid_price, new_ask_price );
 
                                     tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
                                     tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
