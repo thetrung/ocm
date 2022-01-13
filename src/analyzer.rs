@@ -206,27 +206,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     // - sell : will be lowest but higher than average price
     // - buy : will be highiest but lower than average price 
     //
-    // let p1 = tickers_buy.get(&_ring[0]).unwrap();
-    // let p2 = tickers_sell.get(&_ring[1]).unwrap();
-    // let p3 = tickers_sell.get(&_ring[2]).unwrap();
-
-    // // collect ring prices 
-    // let ring_prices = vec![
-    //     p1[0],  // BUSD > BRIDGE
-    //     p2[0],  // BRIDGE > BRIDGE
-    //     p3[0]   // BRIDGE > BUSD
-    // ];
-
     let ring_prices = build_ring(&_ring, &tickers_buy, &tickers_sell);
-    
-    // calculate min volume 
-    // let mut compute_min_volume = // * in stablecoin
-    // vec![ring_prices[0][0]*ring_prices[0][1],                   // priceA x qtyA
-    //     ring_prices[1][0]*ring_prices[1][1]*ring_prices[2][0],  // priceB x priceC x qtyB
-    //     ring_prices[2][0]*ring_prices[2][1]];                   // priceC x qtyC
-
-    // Sorting price x qty 
-    // compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
     //
     // calculate if it's profitable :
     //
@@ -235,26 +215,21 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     let fees = 1.0 - (binance_fees / 100.0); 
 
     let max_invest = MAX_INVEST; // note : 1 round = { 3 trades + 1 request } per second is goal.
-    // let min_volume = compute_min_volume[0]; // already sorted [ min -> max ]
     let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
         
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
     let profit = (sum * fees * fees * fees ) - optimal_invest;
+    // let profit = sum - optimal_invest;
     //
     // OK
-    //
-    if profit > 0.0 {
-        let qty = optimal_invest / ring_prices[0][0];          // println!("optimal / price {} = {}", symbol ,qty);
+    // let's say, we only accept profit > 0.25%
+    if profit > (0.5/100.0) * optimal_invest {
+        let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
-        //
         // LOG
-        //
         let ring_details = format!("{:?} > {:?} > {:?}", ring_prices[0], ring_prices[1], ring_prices[2]).to_string().cyan();
         let log_profit = format!("{:.5}{} {} ${:.4} max: ${:4.2}\t | {}", 
-        (&percentage).to_string().yellow(), 
-        "%".yellow(), "=".bold(),
-        (&profit).to_string().green(), 
-        &optimal_invest, &symbol.bold());
+        (&percentage).to_string().yellow(), "%".yellow(), "=".bold(), (&profit).to_string().green(), &optimal_invest, &symbol.bold());
         //
         // WARNING: invalid pairs
         if profit > optimal_invest * (warning_ratio/100.0) {     
@@ -321,7 +296,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     //
     let mut block_count = 0;
     loop {
-        thread::sleep(DELAY_INIT);          // BLOCK-TIME
+        println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
         let benchmark = SystemTime::now();  // BENCHMARK
         let mut tickers_update_time:Duration = Duration::from_millis(0);
         let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
@@ -335,9 +310,6 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             },
             false => return // break the loop.
         }
-        if IS_DEBUG {
-            println!("\n\n______________[ Round #{} ]______________", block_count);
-        }
         // Get computed result 
         let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_buy, &tickers_sell);
         let arbitrage_count = round_result.len();
@@ -345,12 +317,13 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         // If there's profitable ring 
         if arbitrage_count > 0 {
             // tickers time
-            println!("{}", format!("\n#{}: updated orderbooks in {} ms", 
+            println!("{}", format!("#{}: updated orderbooks in {} ms", 
             block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
             // Sort by Profit 
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
             println!("> found {} arbitrages.", arbitrage_count);
             let trade = &round_result[0];
+            println!("> best: {} | {:.2}% = ${:.2}",trade.symbol, trade.percentage, trade.profit);
             if IS_DEBUG {
                 println!();
                 println!("____________________________");
@@ -367,12 +340,14 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             ring_component.symbol = trade.symbol.clone(); 
             println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
             println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
-            let new_balance = executor::execute_final_ring(&account, &benchmark, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+            let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
             // 3. wait for trade finish
             // 4. evaluate profit
             match new_balance {
-                Some(balance) => virtual_account = balance,
-                None => {}
+                Some(balance) => if balance > 0.0 { virtual_account = balance } else {},
+                None => { // Quit Loop because there is error. 
+                    return; 
+                }
             } 
             //
             // benchmark every block 
@@ -396,6 +371,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         block_count += 1;
         } 
         else if IS_DEBUG { println!("> no arbitrage chances."); }
+        // BLOCK-TIME
+        thread::sleep(DELAY_INIT);         
     }
     // ending
     println!("\n> RailGun Out.\n");
@@ -414,7 +391,7 @@ fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, ticker
 
     // limit order strategy
     let p1 = tickers_buy.get(&ring[0]).unwrap(); // LIMIT_BUY
-    let p2 = tickers_buy.get(&ring[1]).unwrap(); // LIMIT_SELL
+    let p2 = tickers_sell.get(&ring[1]).unwrap(); // LIMIT_SELL
     let p3 = tickers_sell.get(&ring[2]).unwrap(); // LIMIT_SELL
 
     // ticker average strategy
