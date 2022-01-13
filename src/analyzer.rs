@@ -16,22 +16,12 @@ use crate::exchangeinfo::QuantityInfo;
 
 mod executor;
 // TODO:
-// - Save discovered pairs to a cache file
-// - Only re-run cache if no cache file is found, or forced update.
-// * This should be done to reduce function call and init time.
+// 1. Optimize data vs. execution
+// S
 //
-//
-// EXPLAIN:
-// we will use this to finish the ring with 3 parts : 
-// BUSD >> ETHBUSD > ETHBNB > BNBBUSD >> BUSD
-//
-// which mean each ring need to compose like : 
-// 1. symbol + BUSD 
-// 2. symbol + BNB
-// then combine : 1 > 2 > 1
 //
 const IS_DEBUG:bool = false;
-const MAX_INVEST:f64 =100.0;//368.18;
+const MAX_INVEST:f64 =50.0;//368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
 const DELAY_INIT: Duration = Duration::from_millis(2000);
 
@@ -184,17 +174,13 @@ fn update_orderbooks(
                             for ticker in tickers {
                                 // add only ring symbols
                                 if symbol_caches.contains(&ticker.symbol) {
-                                    let step_price = quantity_info[&ticker.symbol].step_price;
-                                    let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
-                                    let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
-                                    
-                                    // println!("{}: old {}/{} => new_bid/ask {}/{}",
-                                    // ticker.symbol,
-                                    // &ticker.bid_price, &ticker.ask_price,
-                                    // new_bid_price, new_ask_price );
-
-                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
-                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
+                                    // let step_price = quantity_info[&ticker.symbol].step_price;
+                                    // let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
+                                    // let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
+                                    // tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
+                                    // tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
+                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
+                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
                                 }
                             }
                         }
@@ -209,7 +195,7 @@ fn update_orderbooks(
 }
 
 /// Compute profit on each ring 
-pub fn analyze_ring( symbol: String, _ring: Vec<String>, 
+pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
     //
     // IMPORTANT: 
@@ -234,13 +220,13 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>,
     let ring_prices = build_ring(&_ring, &tickers_buy, &tickers_sell);
     
     // calculate min volume 
-    let mut compute_min_volume = // * in stablecoin
-    vec![ring_prices[0][0]*ring_prices[0][1],                   // priceA x qtyA
-        ring_prices[1][0]*ring_prices[1][1]*ring_prices[2][0],  // priceB x priceC x qtyB
-        ring_prices[2][0]*ring_prices[2][1]];                   // priceC x qtyC
+    // let mut compute_min_volume = // * in stablecoin
+    // vec![ring_prices[0][0]*ring_prices[0][1],                   // priceA x qtyA
+    //     ring_prices[1][0]*ring_prices[1][1]*ring_prices[2][0],  // priceB x priceC x qtyB
+    //     ring_prices[2][0]*ring_prices[2][1]];                   // priceC x qtyC
 
     // Sorting price x qty 
-    compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
+    // compute_min_volume.sort_by(|a,b| (a).partial_cmp(b).unwrap());
     //
     // calculate if it's profitable :
     //
@@ -249,8 +235,8 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>,
     let fees = 1.0 - (binance_fees / 100.0); 
 
     let max_invest = MAX_INVEST; // note : 1 round = { 3 trades + 1 request } per second is goal.
-    let min_volume = compute_min_volume[0]; // already sorted [ min -> max ]
-    let optimal_invest = if min_volume > max_invest { max_invest } else { min_volume };
+    // let min_volume = compute_min_volume[0]; // already sorted [ min -> max ]
+    let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
         
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
     let profit = (sum * fees * fees * fees ) - optimal_invest;
@@ -283,8 +269,8 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>,
     return None;
 }
 
-fn compute_rings(tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>,
-    rings: &HashMap<String, Vec<String>> ) -> Vec<RingResult>{
+fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
+    tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
     //
     // THREADPOOL
     //
@@ -296,8 +282,9 @@ fn compute_rings(tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<
         let _ring = ring.1.clone();  // ring of pairs
         let _tickers_buy = tickers_buy.clone();
         let _tickers_sell = tickers_sell.clone();
+        let _balance = balance.clone();
         // spawn computation          
-        let thread = thread::spawn(|| { analyze_ring(symbol, _ring, _tickers_buy, _tickers_sell) });
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_buy, _tickers_sell) });
         compute_pool.push(thread);
     }
     let mut round_result = vec![];
@@ -316,9 +303,9 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     //
     // ACCOUNT
     let account = get_account(config);
-    let mut virtual_account = MAX_INVEST;
     //
     // RING COMPONENTS
+    //
     let _config_bridges = &config.get("symbols", "bridges").unwrap();
     let config_bridges:Vec<&str> = _config_bridges.split(',').collect();
     let mut ring_component = RingComponent {
@@ -326,6 +313,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         bridge: String::from(config_bridges[1]),
         stablecoin: String::from(config_bridges[0]) 
     };
+    let mut virtual_account = executor::get_balance( &account, &ring_component.stablecoin).unwrap();
 
     println!("> searching...");
     //
@@ -351,7 +339,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             println!("\n\n______________[ Round #{} ]______________", block_count);
         }
         // Get computed result 
-        let mut round_result = compute_rings(&tickers_buy, &tickers_sell, &rings);
+        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_buy, &tickers_sell);
         let arbitrage_count = round_result.len();
 
         // If there's profitable ring 
@@ -426,7 +414,7 @@ fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, ticker
 
     // limit order strategy
     let p1 = tickers_buy.get(&ring[0]).unwrap(); // LIMIT_BUY
-    let p2 = tickers_sell.get(&ring[1]).unwrap(); // LIMIT_SELL
+    let p2 = tickers_buy.get(&ring[1]).unwrap(); // LIMIT_SELL
     let p3 = tickers_sell.get(&ring[2]).unwrap(); // LIMIT_SELL
 
     // ticker average strategy
