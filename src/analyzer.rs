@@ -296,7 +296,6 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     //
     let mut block_count = 0;
     loop {
-        println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
         let benchmark = SystemTime::now();  // BENCHMARK
         let mut tickers_update_time:Duration = Duration::from_millis(0);
         let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
@@ -316,6 +315,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
 
         // If there's profitable ring 
         if arbitrage_count > 0 {
+            println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
             // tickers time
             println!("{}", format!("#{}: updated orderbooks in {} ms", 
             block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
@@ -341,31 +341,34 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
             println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
             let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+            let mut final_profit:f64 = 0.0;
             // 3. wait for trade finish
             // 4. evaluate profit
             match new_balance {
-                Some(balance) => if balance > 0.0 { virtual_account = balance } else {},
-                None => { // Quit Loop because there is error. 
-                    return; 
+                Some(_balance) => { 
+                    if _balance > 0.0 { 
+                        final_profit = _balance - virtual_account; 
+                        virtual_account = _balance; 
+                        
+                        // benchmark every block 
+                        match benchmark.elapsed() {
+                            Ok(elapsed) => {
+                                // println!("{:?}", &traded_volume_cache);
+                                let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
+                                block_count.to_string().yellow(), 
+                                format!("{:.2}", virtual_account).green(),
+                                format!("{:.2}", trade.qty).green(), 
+                                trade.symbol.green(), 
+                                format!("{:.2}", final_profit).yellow(),
+                                format!("{:.2}", trade.profit).yellow(),  
+                                elapsed.as_millis().to_string().yellow());
+                                println!("{}", fmt);
+                            }
+                            Err(e) => println!("Error: {:?}", e)
+                        }
+                    }},
+                None => { return; // Quit Loop because there is error. 
                 }
-            } 
-            //
-            // benchmark every block 
-            //
-            match benchmark.elapsed() {
-                Ok(elapsed) => {
-                    // println!("{:?}", &traded_volume_cache);
-                    let fmt = format!("#{}: ${} - trade {} {} by ${} for ${:.5} in {} ms",
-                    block_count.to_string().yellow(), 
-                    format!("{:.2}", virtual_account).green(),
-                    format!("{:.2}", trade.qty).green(), 
-                    trade.symbol.green(), 
-                    format!("{:.2}", trade.optimal_invest).green(),
-                    format!("{:.2}", trade.profit).yellow(), 
-                    elapsed.as_millis().to_string().yellow());
-                    println!("{}", fmt);
-                }
-                Err(e) => println!("Error: {:?}", e)
             }
         //5. next block !
         block_count += 1;
@@ -391,7 +394,7 @@ fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, ticker
 
     // limit order strategy
     let p1 = tickers_buy.get(&ring[0]).unwrap(); // LIMIT_BUY
-    let p2 = tickers_sell.get(&ring[1]).unwrap(); // LIMIT_SELL
+    let p2 = tickers_buy.get(&ring[1]).unwrap(); // LIMIT_SELL
     let p3 = tickers_sell.get(&ring[2]).unwrap(); // LIMIT_SELL
 
     // ticker average strategy

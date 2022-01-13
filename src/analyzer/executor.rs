@@ -109,7 +109,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 1. Buy OOKI-BUSD
     //
     symbol = &final_ring[0];
-    let first_order = optimal_invest/(prices[0][0] + quantity_info[symbol].step_price) * FEES;
+    let first_order = optimal_invest/(prices[0][0] + 1.0 * quantity_info[symbol].step_price) * FEES;
 
     balance_qty = correct_lots_qty(symbol, first_order, quantity_info);
     println!("> limit_buy: {} {} at {}", 
@@ -158,9 +158,10 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     //
     symbol = &final_ring[2];
     balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
-    println!("> limit_sell: {} {} at {}", 
+    println!("> market_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
-    match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+    // match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+    match account.market_sell(symbol, balance_qty) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => { 
             format_error(e.0); 
