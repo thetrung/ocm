@@ -15,29 +15,39 @@ use std::{
 use crate::exchangeinfo::QuantityInfo;
 use crate::analyzer::RingComponent;
 
-const FEES: f64 = 0.99925; // no BNB = 0.999
 /// Wait time between orders
-const POLLING_ORDER: Duration = Duration::from_millis(500);
+const POLLING_ORDER: Duration = Duration::from_millis(250);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
-fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str) -> Option<f64> {
+fn polling_order(account: &Account, order_id: u64, qty: f64, symbol: &str, is_1st_order: bool) -> Option<f64> {
+    let mut polling_count = 0;
     println!("> order: #{} for {} {}", &order_id.to_string().yellow(), qty.to_string().green(), &symbol.green());
     loop {
         match account.order_status(symbol, order_id) {
             Ok(answer) => {
                 match answer.status.as_str() {
                     "FILLED" => {
-                        println!("> executed qty: {}/{}", answer.executed_qty.green(), qty);
+                        println!("> executed qty: {}/{} after {} polls.", answer.executed_qty.green(), qty, &polling_count);
                         return Some(answer.executed_qty.parse::<f64>().unwrap());
                     },  // can move on next symbol
                     "CANCELED" => return None, // on purpose ;) move to next round ?
+                    "NEW" => if polling_count > 0 && is_1st_order { 
+                        match account.cancel_order(symbol, order_id){
+                            Ok(_) => { 
+                                println!("> cancelled #{} after {} polls.", order_id.to_string().yellow(), polling_count);
+                                return None; // cancel and re-buy like market-buy.
+                            },
+                            Err(e) => format_error(e.0)
+                        }
+                    },
                     _ => {}//println!("> {} {} is {:?}", qty, &symbol ,answer.status)
                 }
             },
             Err(e) => format_error(e.0),
         }
-        thread::sleep(POLLING_ORDER);
+        if polling_count > 0 { thread::sleep(POLLING_ORDER) }
+        polling_count += 1;
     }            
 }
 
@@ -100,6 +110,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     
     // prepare balance 
     let _current_balance = get_balance(&account, &ring_component.stablecoin).unwrap(); println!();
+    if _current_balance < 10.0 { return None; } // Break because this will be serious error.
     let optimal_invest = if config_invest > _current_balance { _current_balance } else { config_invest };
 
 
@@ -109,14 +120,14 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 1. Buy OOKI-BUSD
     //
     symbol = &final_ring[0];
-    let first_order = optimal_invest/(prices[0][0]);// + 1.0 * quantity_info[symbol].step_price);
+    let first_order = optimal_invest/(prices[0][0]);
 
     balance_qty = correct_lots_qty(symbol, first_order, quantity_info);
     println!("> limit_buy: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), (optimal_invest/first_order).to_string().yellow());
     match account.limit_buy(symbol, balance_qty, prices[0][0]) {
     // match account.market_buy(symbol, balance_qty) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol, true),
         Err(e) => { 
             format_error(e.0); 
             // return None; 
@@ -133,13 +144,12 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 2. Sell OOKI-BTC
     //
     symbol = &final_ring[1];
-    // step_price = quantity_info[symbol].step_price;
     balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info); 
-    custom_price = correct_price_filter(symbol, quantity_info, prices[1][0]);// - 1.0 * step_price);
+    custom_price = correct_price_filter(symbol, quantity_info, prices[1][0]);
     println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, custom_price) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol, false),
         Err(e) => { 
             format_error(e.0);
             return None
@@ -162,7 +172,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, prices[2][0]) {
     // match account.market_sell(symbol, balance_qty) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol, false),
         Err(e) => { 
             format_error(e.0); 
             return None; // Error

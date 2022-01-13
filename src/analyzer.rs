@@ -174,13 +174,13 @@ fn update_orderbooks(
                             for ticker in tickers {
                                 // add only ring symbols
                                 if symbol_caches.contains(&ticker.symbol) {
-                                    // let step_price = quantity_info[&ticker.symbol].step_price;
-                                    // let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
-                                    // let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
-                                    // tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
-                                    // tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
-                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
-                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
+                                    let step_price = quantity_info[&ticker.symbol].step_price;
+                                    let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
+                                    let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
+                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
+                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
+                                    // tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
+                                    // tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
                                 }
                             }
                         }
@@ -210,19 +210,19 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     //
     // calculate if it's profitable :
     //
-    let binance_fees = 0.1; // as 0.1 ~ 0.0750% 
+    // let binance_fees = 0.1; // as 0.1 ~ 0.0750% 
     let warning_ratio = 5.0; // as ~ 5.0%
-    let fees = 1.0 - (binance_fees / 100.0); 
+    // let fees = 1.0 - (binance_fees / 100.0); 
 
     let max_invest = MAX_INVEST; // note : 1 round = { 3 trades + 1 request } per second is goal.
     let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
         
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
-    let profit = (sum * fees * fees * fees ) - optimal_invest;
-    // let profit = sum - optimal_invest;
+    // let profit = (sum * fees * fees * fees ) - optimal_invest;
+    let profit = sum - optimal_invest;
     //
     // OK
-    // let's say, we only accept profit > 0.25%
+    // let's say, we only accept profit > 0.5%
     if profit > (0.5/100.0) * optimal_invest {
         let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
