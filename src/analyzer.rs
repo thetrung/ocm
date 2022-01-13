@@ -394,7 +394,7 @@ fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, ticker
 
     // limit order strategy
     let p1 = tickers_buy.get(&ring[0]).unwrap(); // LIMIT_BUY
-    let p2 = tickers_buy.get(&ring[1]).unwrap(); // LIMIT_SELL
+    let p2 = tickers_sell.get(&ring[1]).unwrap(); // LIMIT_SELL
     let p3 = tickers_sell.get(&ring[2]).unwrap(); // LIMIT_SELL
 
     // ticker average strategy

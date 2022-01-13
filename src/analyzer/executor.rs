@@ -109,13 +109,13 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 1. Buy OOKI-BUSD
     //
     symbol = &final_ring[0];
-    let first_order = optimal_invest/(prices[0][0] + 1.0 * quantity_info[symbol].step_price) * FEES;
+    let first_order = optimal_invest/(prices[0][0]);// + 1.0 * quantity_info[symbol].step_price);
 
     balance_qty = correct_lots_qty(symbol, first_order, quantity_info);
     println!("> limit_buy: {} {} at {}", 
-    &balance_qty.to_string().green(), symbol.green(), &prices[0][0].to_string().yellow());
-    // match account.limit_buy(symbol, balance_qty, prices[0][0]) {
-    match account.market_buy(symbol, balance_qty) {
+    &balance_qty.to_string().green(), symbol.green(), (optimal_invest/first_order).to_string().yellow());
+    match account.limit_buy(symbol, balance_qty, prices[0][0]) {
+    // match account.market_buy(symbol, balance_qty) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => { 
             format_error(e.0); 
@@ -133,9 +133,9 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 2. Sell OOKI-BTC
     //
     symbol = &final_ring[1];
-    step_price = quantity_info[symbol].step_price;
+    // step_price = quantity_info[symbol].step_price;
     balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info); 
-    custom_price = correct_price_filter(symbol, quantity_info, prices[1][0] - 1.0 * step_price);
+    custom_price = correct_price_filter(symbol, quantity_info, prices[1][0]);// - 1.0 * step_price);
     println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, custom_price) {
@@ -158,10 +158,10 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     //
     symbol = &final_ring[2];
     balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
-    println!("> market_sell: {} {} at {}", 
+    println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
-    // match account.limit_sell(symbol, balance_qty, prices[2][0]) {
-    match account.market_sell(symbol, balance_qty) {
+    match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+    // match account.market_sell(symbol, balance_qty) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => { 
             format_error(e.0); 
