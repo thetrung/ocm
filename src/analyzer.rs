@@ -23,7 +23,12 @@ mod executor;
 const IS_DEBUG:bool = false;
 const MAX_INVEST:f64 =50.0;//368.18;
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(2000);
+const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 secs
+
+// how aggressive we create new orderbooks
+const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
+const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
+const SAFE_LIFETIME:i32 = 3; // ensure a trade last for some blocks before it disappear.
 
 pub struct RingResult {
     symbol :String,
@@ -152,9 +157,7 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
     println!("> built rings map.");
     return symbols_rings;
 }
-
-/// All we need is this tickers to divide into ASK+BID table
-/// to cache prices for each symbol before computing profitable chances.
+/// This update tickers into ASK+BID table.
 fn update_orderbooks(
     market: &Market, symbol_caches: &Vec<String>,
     tickers_buy: &mut HashMap<String, [f64;2]>, 
@@ -175,8 +178,8 @@ fn update_orderbooks(
                                 // add only ring symbols
                                 if symbol_caches.contains(&ticker.symbol) {
                                     let step_price = quantity_info[&ticker.symbol].step_price;
-                                    let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + step_price);
-                                    let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - step_price);
+                                    let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + BID_STEP * step_price);
+                                    let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + ASK_STEP * step_price);
                                     tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
                                     tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
                                     // tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
@@ -193,7 +196,6 @@ fn update_orderbooks(
     };
     return false;
 }
-
 /// Compute profit on each ring 
 pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
@@ -210,11 +212,9 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     //
     // calculate if it's profitable :
     //
-    // let binance_fees = 0.1; // as 0.1 ~ 0.0750% 
     let warning_ratio = 5.0; // as ~ 5.0%
-    // let fees = 1.0 - (binance_fees / 100.0); 
-
-    let max_invest = MAX_INVEST; // note : 1 round = { 3 trades + 1 request } per second is goal.
+    
+    let max_invest = MAX_INVEST; 
     let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
         
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
@@ -278,6 +278,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     //
     // ACCOUNT
     let account = get_account(config);
+    let mut trade_best = String::new();
+    let mut trade_lifetime = 0; // as blocks, longer a trade last, more stable price is.
     //
     // RING COMPONENTS
     //
@@ -323,51 +325,60 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
             println!("> found {} arbitrages.", arbitrage_count);
             let trade = &round_result[0];
-            println!("> best: {} | {:.2}% = ${:.2}",trade.symbol, trade.percentage, trade.profit);
-            if IS_DEBUG {
-                println!();
-                println!("____________________________");
-                for result in &round_result {
-                    println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
-                }
-                println!("____________________________");
+            // record lifetime for each trade
+            if trade_best != trade.symbol { 
+                trade_lifetime = 0; // restart
+                trade_best = trade.symbol.clone();  
+            } else { 
+                trade_lifetime += 1; 
             }
-            // Build ring prices
-            let final_ring = &rings[&trade.symbol];
-            let ring_prices = build_ring(final_ring, &tickers_buy, &tickers_sell);
+            if trade_lifetime > SAFE_LIFETIME {
+                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks",trade.symbol, trade.percentage, trade.profit, trade_lifetime);
+                if IS_DEBUG {
+                    println!();
+                    println!("____________________________");
+                    for result in &round_result {
+                        println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
+                    }
+                    println!("____________________________");
+                }
+                // Build ring prices
+                let final_ring = &rings[&trade.symbol];
+                let ring_prices = build_ring(final_ring, &tickers_buy, &tickers_sell);
 
-            // 2. send it > executor
-            ring_component.symbol = trade.symbol.clone(); 
-            println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-            println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
-            let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
-            let mut final_profit:f64 = 0.0;
-            // 3. wait for trade finish
-            // 4. evaluate profit
-            match new_balance {
-                Some(_balance) => { 
-                    if _balance > 0.0 { 
-                        final_profit = _balance - virtual_account; 
-                        virtual_account = _balance; 
-                        
-                        // benchmark every block 
-                        match benchmark.elapsed() {
-                            Ok(elapsed) => {
-                                // println!("{:?}", &traded_volume_cache);
-                                let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
-                                block_count.to_string().yellow(), 
-                                format!("{:.2}", virtual_account).green(),
-                                format!("{:.2}", trade.qty).green(), 
-                                trade.symbol.green(), 
-                                format!("{:.2}", final_profit).yellow(),
-                                format!("{:.2}", trade.profit).yellow(),  
-                                elapsed.as_millis().to_string().yellow());
-                                println!("{}", fmt);
+                // 2. send best trade > executor
+                ring_component.symbol = trade.symbol.clone(); 
+                println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
+                println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
+                let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+                let mut final_profit:f64 = 0.0;
+                // 3. wait for trade finish
+                // 4. evaluate profit
+                match new_balance {
+                    Some(_balance) => { 
+                        if _balance > 0.0 { 
+                            final_profit = _balance - virtual_account; 
+                            virtual_account = _balance; 
+                            
+                            // benchmark every block 
+                            match benchmark.elapsed() {
+                                Ok(elapsed) => {
+                                    // println!("{:?}", &traded_volume_cache);
+                                    let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
+                                    block_count.to_string().yellow(), 
+                                    format!("{:.2}", virtual_account).green(),
+                                    format!("{:.2}", trade.qty).green(), 
+                                    trade.symbol.green(), 
+                                    format!("{:.2}", final_profit).yellow(),
+                                    format!("{:.2}", trade.profit).yellow(),  
+                                    elapsed.as_millis().to_string().yellow());
+                                    println!("{}", fmt);
+                                }
+                                Err(e) => println!("Error: {:?}", e)
                             }
-                            Err(e) => println!("Error: {:?}", e)
-                        }
-                    }},
-                None => { return; // Quit Loop because there is error. 
+                        }},
+                    None => { return; // Quit Loop because there is error. 
+                    }
                 }
             }
         //5. next block !
@@ -381,9 +392,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     println!("\n> RailGun Out.\n");
 }
 
-//
-// UTILITIES
-//
+/// correct price filter to ensure order pass through.
 fn correct_price_filter(symbol: &str, quantity_info: &HashMap<String, QuantityInfo>,  price: f64) -> f64 {
     let move_price = quantity_info[symbol].move_price;
     return f64::trunc(price  * move_price) / move_price;

@@ -82,7 +82,7 @@ fn format_error(e: BinanceLibErrorKind){
 
 fn format_result(balance_qty:f64, symbol: &str, benchmark: &SystemTime){
     println!("{}", format!(
-        "> result: {:?} {} after {} ms.\n", 
+        "> success: {:?} {} after {} ms.\n", 
         balance_qty, 
         symbol, 
         benchmark.elapsed().unwrap().as_millis().to_string()).green());
