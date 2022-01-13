@@ -68,7 +68,7 @@ struct Symbol {
     permissions	: Vec<String>
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct QuantityInfo {
     pub symbol	: String,       // pair symbol
     pub min_qty: String,        // min qty -> qty cap

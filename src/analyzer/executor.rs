@@ -93,7 +93,7 @@ fn format_result(balance_qty:f64, symbol: &str, benchmark: &SystemTime){
 /// Execute best ring found in previous round result.
 pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     final_ring: &Vec<String>, prices: &Vec<[f64;2]>, config_invest: f64, 
-    quantity_info: &HashMap<String, QuantityInfo>) -> Option<f64> {
+    quantity_info: HashMap<String, QuantityInfo>) -> Option<f64> {
     
     let benchmark = SystemTime::now();
     println!("> -------------------------------------------------- <");
@@ -124,7 +124,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     symbol = &final_ring[0];
     let first_order = optimal_invest/(prices[0][0]);
 
-    balance_qty = correct_lots_qty(symbol, first_order, quantity_info);
+    balance_qty = correct_lots_qty(symbol, first_order, &quantity_info);
     println!("> limit_buy: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), (optimal_invest/first_order).to_string().yellow());
     match account.limit_buy(symbol, balance_qty, prices[0][0]) {
@@ -146,8 +146,8 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 2. Sell OOKI-BTC
     //
     symbol = &final_ring[1];
-    balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info); 
-    custom_price = correct_price_filter(symbol, quantity_info, prices[1][0]);
+    balance_qty = correct_lots_qty(symbol, balance_qty, &quantity_info); 
+    custom_price = correct_price_filter(symbol, &quantity_info, prices[1][0]);
     println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, custom_price) {
@@ -169,7 +169,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     // 3. Sell BTC-BUSD
     //
     symbol = &final_ring[2];
-    balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
+    balance_qty = correct_lots_qty(symbol, balance_qty, &quantity_info);
     println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, prices[2][0]) {

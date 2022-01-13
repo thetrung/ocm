@@ -31,7 +31,7 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
 const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
 const SAFE_LIFETIME:i32 = 5; // ensure a trade last for some blocks before it disappear.
-const RISK_GAP:f64 = 0.2; // percent
+const RISK_GAP:f64 = 30.0; // less than 10 is pretty safe.
 
 pub struct RingResult {
     symbol :String,
@@ -201,7 +201,7 @@ fn update_orderbooks(
     return false;
 }
 /// Compute profit on each ring 
-pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
+pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64, quantity_info: HashMap<String, QuantityInfo>,
     tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
     //
     // IMPORTANT: 
@@ -221,7 +221,12 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     let profit = sum - optimal_invest;
     //
     // compute RISK: determine by GAP percent between top2 tickers.
-    let risk_gap = (ring_prices[0][0] / ring_prices[0][0] - 1.0) * 100.0; // percent
+    let risk_gap = (
+        ( tickers_sell[&_ring[0]][0] - tickers_buy[&_ring[0]][0] ) / quantity_info[&_ring[0]].step_price + 
+        ( tickers_sell[&_ring[1]][0] - tickers_buy[&_ring[1]][0] ) / quantity_info[&_ring[1]].step_price + 
+        ( tickers_sell[&_ring[2]][0] - tickers_buy[&_ring[2]][0] ) / quantity_info[&_ring[2]].step_price ) 
+        / 3.0; // multiplier
+        // println!("{}: risk = {}", symbol, risk_gap);
     //
     //
     // OK
@@ -247,7 +252,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     return None;
 }
 
-fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
+fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64, quantity_info: HashMap<String, QuantityInfo>,
     tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
     //
     // THREADPOOL
@@ -261,8 +266,9 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
         let _tickers_buy = tickers_buy.clone();
         let _tickers_sell = tickers_sell.clone();
         let _balance = balance.clone();
+        let _quantity_info = quantity_info.clone();
         // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_buy, _tickers_sell) });
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _quantity_info, _tickers_buy, _tickers_sell) });
         compute_pool.push(thread);
     }
     let mut round_result = vec![];
@@ -315,7 +321,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             false => return // break the loop.
         }
         // Get computed result 
-        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_buy, &tickers_sell);
+        let mut round_result = compute_rings( &rings, virtual_account.clone(), quantity_info.clone(), &tickers_buy, &tickers_sell);
         let arbitrage_count = round_result.len();
 
         // If there's profitable ring 
@@ -342,7 +348,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                     println!();
                     println!("____________________________");
                     for result in &round_result {
-                        println!("| {:.2}% = ${:.2}    | {}",result.percentage, result.profit, result.symbol);
+                        println!("| {:.2}% = ${:.2}  risk: {}%  | {}",
+                        result.percentage, result.profit,  result.risk_gap, result.symbol);
                     }
                     println!("____________________________");
                 }
@@ -354,7 +361,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 ring_component.symbol = trade.symbol.clone(); 
                 println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
                 println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
-                let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
+                let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                 let mut final_profit:f64 = 0.0;
                 // 3. wait for trade finish
                 // 4. evaluate profit
