@@ -28,7 +28,7 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 // how aggressive we create new orderbooks
 const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
 const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
-const SAFE_LIFETIME:i32 = 3; // ensure a trade last for some blocks before it disappear.
+const SAFE_LIFETIME:i32 = 5; // ensure a trade last for some blocks before it disappear.
 
 pub struct RingResult {
     symbol :String,
