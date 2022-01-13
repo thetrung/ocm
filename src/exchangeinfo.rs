@@ -74,7 +74,7 @@ pub struct QuantityInfo {
     pub minQty: String,         // min qty -> qty cap
     pub maxQty: String,         // max qty -> qty cap
     pub stepSize: String,       // decimal -> qty cap
-    pub stepSizeDecimal: i32,   // we pre-calculate here 
+    pub move_decimal: f64,   // we pre-calculate here 
 }
 
 const QUANTITY_INFO_FILE:&str = "quantity.cache";
@@ -118,22 +118,24 @@ pub fn fetch(symbols_cache: &Vec<String>) -> Option<HashMap<String, QuantityInfo
                                         let decimal_arr:Vec<&str> = arr[1].split("1").collect();
                                         let decimal_point = match decimal_arr.len() {
                                             2 => { // less than 1.00..
-                                                (decimal_arr[0].len() + 1) as i32
+                                                (decimal_arr[0].len() + 1) as f64
                                             },
                                             1 => { // is 1.000
-                                                0 // no decimal point.
+                                                0.0 // no decimal point.
                                             },
-                                            _ => {println!("ERROR ?"); 0}
+                                            _ => {println!("ERROR ?"); 0.0}
                                         };
-                                        println!("{} stepSize: {} => {:?} => {} points", &_symbol, &_step_size , &decimal_arr, &decimal_point);
-                                        decimal_point
+                                        let one_decimal:f64 = 10.0;
+                                        let move_decimal = one_decimal.powf(decimal_point);
+                                        println!("{} stepSize: {} => {:?} => {} points", &_symbol, &_step_size , &decimal_arr, &move_decimal);
+                                        move_decimal
                                     };
                                     let new_quantity_info = QuantityInfo {
                                         symbol: _symbol.clone(), 
                                         minQty : String::from(filter.minQty.as_ref().unwrap()), 
                                         maxQty: String::from(filter.maxQty.as_ref().unwrap()), 
                                         stepSize: String::from(_step_size),
-                                        stepSizeDecimal: _step_size_decimal 
+                                        move_decimal: _step_size_decimal 
                                     };
                                     quantity_info.insert(_symbol, new_quantity_info);
                                 }
