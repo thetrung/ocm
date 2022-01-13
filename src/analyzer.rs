@@ -366,7 +366,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             // 2. send it > executor
             ring_component.symbol = trade.symbol.clone(); 
             println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-            println!("> best: buy {:?} > sell {:?} > sell {:?}", ring_prices[0], ring_prices[1], ring_prices[2]);
+            println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
             let new_balance = executor::execute_final_ring(&account, &benchmark, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info);
             // 3. wait for trade finish
             // 4. evaluate profit

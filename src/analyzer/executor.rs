@@ -141,7 +141,7 @@ pub fn execute_final_ring(account: &Account, benchmark: &SystemTime, ring_compon
     step_price = quantity_info[symbol].step_price;
     balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
     println!("> limit_sell: {} {} at {} + {}", 
-    &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow(), step_price);
+    &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow(), 0.25 * 1000.0 * step_price);
     match account.limit_sell(symbol, balance_qty, prices[2][0] + 0.25 * 1000.0 * step_price) {
         Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => format_error(e.0),
