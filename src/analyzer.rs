@@ -16,8 +16,10 @@ use crate::exchangeinfo::QuantityInfo;
 
 mod executor;
 // TODO:
-// 1. Optimize data vs. execution
-// S
+// 1. Compute RISK involve each pair by ASK/BID ratio.
+// Lower GAP = Higher fillable possibility.
+// as observe, any GAP > 0.1% is slow filling.
+// 0.4 ~ 0.7% may take very long time to fill. 
 //
 //
 const IS_DEBUG:bool = false;
@@ -29,13 +31,15 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
 const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
 const SAFE_LIFETIME:i32 = 5; // ensure a trade last for some blocks before it disappear.
+const RISK_GAP:f64 = 0.2; // percent
 
 pub struct RingResult {
     symbol :String,
     percentage :f64, 
     profit :f64, 
     qty :f64, 
-    optimal_invest :f64
+    optimal_invest :f64,
+    risk_gap: f64
 }
 
 pub struct RingComponent {
@@ -210,20 +214,19 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     //
     let ring_prices = build_ring(&_ring, &tickers_buy, &tickers_sell);
     //
-    // calculate if it's profitable :
-    //
+    // is it profitable ? 
     let warning_ratio = 5.0; // as ~ 5.0%
-    
-    let max_invest = MAX_INVEST; 
-    let optimal_invest = if min_invest > max_invest { max_invest } else { min_invest };
-        
+    let optimal_invest = if min_invest > MAX_INVEST { MAX_INVEST } else { min_invest };
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
-    // let profit = (sum * fees * fees * fees ) - optimal_invest;
     let profit = sum - optimal_invest;
     //
+    // compute RISK: determine by GAP percent between top2 tickers.
+    let risk_gap = (ring_prices[0][0] / ring_prices[0][0] - 1.0) * 100.0; // percent
+    //
+    //
     // OK
-    // let's say, we only accept profit > 0.5%
-    if profit > (0.5/100.0) * optimal_invest {
+    // let's say, we only accept profit > 0.5% and risk < 0.2%
+    if profit > (0.5/100.0) * optimal_invest && risk_gap < RISK_GAP {
         let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         // LOG
@@ -239,7 +242,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
         //
         // PROFITABLE: normal log
         if IS_DEBUG { println!("\n{}\n{}", log_profit, ring_details); }
-        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
+        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest, risk_gap }); 
     }
     return None;
 }
@@ -333,7 +336,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 trade_lifetime += 1; 
             }
             if trade_lifetime > SAFE_LIFETIME {
-                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks",trade.symbol, trade.percentage, trade.profit, trade_lifetime);
+                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks | risk: {}%",
+                trade.symbol, trade.percentage, trade.profit, trade_lifetime, trade.risk_gap);
                 if IS_DEBUG {
                     println!();
                     println!("____________________________");
