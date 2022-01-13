@@ -59,75 +59,103 @@ fn get_balance(account: &Account, symbol: &str) -> Option<f64>{
     }
 }
 
-fn correct_lots_qty(final_ring: &Vec<String>, prices: &Vec<f64>, 
-    optimal_invest: f64, quantity_info: &HashMap<String, QuantityInfo>) -> f64 {
+fn correct_lots_qty(ring: &str, qty: f64, quantity_info: &HashMap<String, QuantityInfo>) -> f64 {
     //
     // Buy > Sell > Sell
     //
-    let decimal_place = quantity_info[&final_ring[0]].stepSizeDecimal as f64;
-
-    let one_decimal:f64 = 10.0;
-    let move_decimal = one_decimal.powf(decimal_place);
     let fees = 1.0 - (0.075 / 100.0);
-    let buy_qty = optimal_invest/prices[0] * fees;
-    let qty_first_buy = f64::trunc(buy_qty  * move_decimal) / move_decimal;
+    let buy_qty = qty * fees;
+    let move_qty = quantity_info[ring].move_qty;
+    let corrected_qty = f64::trunc(buy_qty  * move_qty) / move_qty;
     
-    // println!("> qty: {} => {} as {} has only {} decimals.", 
-    // buy_qty, qty_first_buy, quantity_info[&final_ring[0]].stepSize ,decimal_place);
-    return qty_first_buy;
+    println!("> qty: {} => {} as {} has only {} decimals.", 
+    buy_qty, corrected_qty, quantity_info[ring].step_qty , move_qty);
+    return corrected_qty;
 }
 
 /// Execute best ring found in previous round result.
-pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
-    final_ring: &Vec<String>, prices: &Vec<f64>, config_invest: f64, 
+pub fn execute_final_ring(account: &Account, benchmark: &SystemTime, ring_component: &RingComponent,
+    final_ring: &Vec<String>, prices: &Vec<[f64;2]>, config_invest: f64, 
     quantity_info: &HashMap<String, QuantityInfo>) -> Option<f64> {
     
+    //> for testing purpose.
+    return None;
 
+    // states
     let mut order_result = false;
+
+    // correct lots + step_size
+    let mut symbol:&str;
+    let mut step_qty:f64 = 0.0;
+    let mut balance_qty:f64 = 0.0;
+    
+    // prepare balance 
     let _current_balance = get_balance(&account, &ring_component.stablecoin).unwrap();
     let optimal_invest = if config_invest > _current_balance { _current_balance } else { config_invest };
-    let mut balance_qty:f64 = correct_lots_qty(final_ring, prices, optimal_invest, quantity_info);
-    // for testing purpose.
-    // return None;
+
     //
     // 1. Buy OOKI-BUSD
     //
-    println!("> limit_buy: {} {} at {}", &balance_qty.to_string().green(), &final_ring[0].green(), &prices[0].to_string().yellow());
-    match account.limit_buy(&final_ring[0], balance_qty, prices[0]) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[0]),
+    symbol = &final_ring[0];
+    step_qty = quantity_info[symbol].step_qty;
+    balance_qty = correct_lots_qty(symbol, optimal_invest/prices[0][0], quantity_info);
+    println!("> limit_buy: {} {} at {}", &balance_qty.to_string().green(), symbol.green(), &prices[0][0].to_string().yellow());
+    match account.market_buy(symbol, balance_qty) {
+    // match account.limit_buy(symbol, balance_qty, prices[0][0]) {
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => println!("Error: {:?}", e),
     }
-    if order_result { 
+    if order_result {
+        let mut tickers_update_time:String = String::new();
+        match benchmark.elapsed() {
+            Ok(elapsed) => tickers_update_time = elapsed.as_millis().to_string(),
+            Err(e) => println!("> can't benchmark update_orderbooks: {:?}", e)
+        }
         balance_qty = get_balance(&account, &ring_component.symbol).unwrap();
-        println!("> executed: limit_buy for {:?} {}", balance_qty, &final_ring[0]);
+        println!("> executed: limit_buy for {:?} {} in {:?}", balance_qty, symbol, tickers_update_time);
     }
     else { return None }
-    
     //
     // 2. Sell OOKI-BNB
     //
-    println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), &final_ring[1].green(), &prices[1].to_string().yellow());
-    match account.limit_sell(&final_ring[1], balance_qty, prices[1]) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[1]),
+    symbol = &final_ring[1];
+    step_qty = quantity_info[symbol].step_qty;
+    balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
+    println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
+    match account.limit_sell(symbol, balance_qty, prices[1][0]) {
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => println!("Error: {:?}", e),
     }
     if order_result { 
+        let mut tickers_update_time:String = String::new();
+        match benchmark.elapsed() {
+            Ok(elapsed) => tickers_update_time = elapsed.as_millis().to_string(),
+            Err(e) => println!("> can't benchmark update_orderbooks: {:?}", e)
+        }
         balance_qty = get_balance(&account, &ring_component.bridge).unwrap();
-        println!("> executed: limit_sell for {:?} {}", balance_qty, &final_ring[1]);
+        println!("> executed: limit_sell for for {:?} {} in {:?}", balance_qty, symbol, tickers_update_time);
     }
     else { return None }
 
     //
     // 3. Sell BNB-BUSD
     //
-    println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), &final_ring[2].green(), &prices[2].to_string().yellow());
-    match account.limit_sell(&final_ring[2], balance_qty, prices[2]) {
-        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, &final_ring[2]),
+    symbol = &final_ring[2];
+    step_qty = quantity_info[symbol].step_qty;
+    balance_qty = correct_lots_qty(symbol, balance_qty, quantity_info);
+    println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
+    match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+        Ok(answer) => order_result = polling_order(&account, answer.order_id, balance_qty, symbol),
         Err(e) => println!("Error: {:?}", e),
     }
     if order_result { 
+        let mut tickers_update_time:String = String::new();
+        match benchmark.elapsed() {
+            Ok(elapsed) => tickers_update_time = elapsed.as_millis().to_string(),
+            Err(e) => println!("> can't benchmark update_orderbooks: {:?}", e)
+        }
         balance_qty = get_balance(&account, &ring_component.stablecoin).unwrap();
-        println!("> executed: limit_sell for {:?} {}", balance_qty, &final_ring[2]); 
+        println!("> executed: limit_sell for for {:?} {} in {:?}", balance_qty, symbol, tickers_update_time);
     }
     else { return None }
 

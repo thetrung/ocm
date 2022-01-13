@@ -28,10 +28,10 @@ struct Filter {
     minQty: Option<String>,   // min qty -> qty cap
     maxQty: Option<String>,   // max qty -> qty cap
     stepSize: Option<String>, // decimal -> qty cap
+    tickSize: Option<String>, // price lot -> "0.00000100"
     // 
     // not important stuffs
     //
-    tickSize: Option<String>, // "0.00000100"
     minPrice: Option<String>, // fetched from tickers
     maxPrice: Option<String>, // fetched from tickers
     multiplierUp: Option<String>, 
@@ -71,10 +71,26 @@ struct Symbol {
 #[derive(Serialize, Deserialize)]
 pub struct QuantityInfo {
     pub symbol	: String,       // pair symbol
-    pub minQty: String,         // min qty -> qty cap
-    pub maxQty: String,         // max qty -> qty cap
-    pub stepSize: String,       // decimal -> qty cap
-    pub move_decimal: f64,   // we pre-calculate here 
+    pub min_qty: String,        // min qty -> qty cap
+    pub max_qty: String,        // max qty -> qty cap
+    pub step_qty: f64,          // step size
+    pub step_price: f64,        // step price
+    pub move_qty: f64,          // we pre-calculate for step_qty correction 
+    pub move_price: f64         // we pre-calculate for step_price correction 
+}
+
+impl Default for QuantityInfo { 
+    fn default() -> QuantityInfo {
+        QuantityInfo { 
+            symbol: String::new(), 
+            min_qty: String::new(), 
+            max_qty: String::new(), 
+            step_qty: 0.0,
+            step_price: 0.0,
+            move_qty: 0.0,
+            move_price: 0.0
+        }
+    }
 }
 
 const QUANTITY_INFO_FILE:&str = "quantity.cache";
@@ -109,36 +125,44 @@ pub fn fetch(symbols_cache: &Vec<String>) -> Option<HashMap<String, QuantityInfo
                     // start building map
                     for symbol in &exchange_info.symbols {
                         if symbols_cache.contains(&symbol.symbol) {
+                            //
+                            // init data
+                            let _symbol = String::from(&symbol.symbol);
+                            let mut _min_qty = String::new();
+                            let mut _max_qty =String::new();
+                            let mut _step_qty: f64 = 0.0;
+                            let mut _step_price : f64 = 0.0;
+                            let mut _move_qty : f64 = 0.0;
+                            let mut _move_price : f64 = 0.0;
+                            //
+                            // collect quantity info for 1 symbol :
                             for filter in &symbol.filters {
-                                if &filter.filterType == "LOT_SIZE" {
-                                    let _symbol = String::from(&symbol.symbol);
-                                    let _step_size = filter.stepSize.as_ref().unwrap();
-                                    let _step_size_decimal = {
-                                        let arr:Vec<&str> = _step_size.split(".").collect();
-                                        let decimal_arr:Vec<&str> = arr[1].split("1").collect();
-                                        let decimal_point = match decimal_arr.len() {
-                                            2 => { // less than 1.00..
-                                                (decimal_arr[0].len() + 1) as f64
-                                            },
-                                            1 => { // is 1.000
-                                                0.0 // no decimal point.
-                                            },
-                                            _ => {println!("ERROR ?"); 0.0}
-                                        };
-                                        let one_decimal:f64 = 10.0;
-                                        let move_decimal = one_decimal.powf(decimal_point);
-                                        println!("{} stepSize: {} => {:?} => {} points", &_symbol, &_step_size , &decimal_arr, &move_decimal);
-                                        move_decimal
-                                    };
-                                    let new_quantity_info = QuantityInfo {
-                                        symbol: _symbol.clone(), 
-                                        minQty : String::from(filter.minQty.as_ref().unwrap()), 
-                                        maxQty: String::from(filter.maxQty.as_ref().unwrap()), 
-                                        stepSize: String::from(_step_size),
-                                        move_decimal: _step_size_decimal 
-                                    };
-                                    quantity_info.insert(_symbol, new_quantity_info);
+                                match &filter.filterType.as_str() { 
+                                    &"LOT_SIZE" => {
+                                        let _step_size = filter.stepSize.as_ref().unwrap();
+                                        let _step_size_decimal = move_decimal(_step_size);
+                                        _min_qty = filter.minQty.as_ref().unwrap().clone(); 
+                                        _max_qty = filter.maxQty.as_ref().unwrap().clone(); 
+                                        _step_qty = _step_size.parse::<f64>().unwrap();
+                                        _move_qty = _step_size_decimal;
+                                    },
+                                    &"PRICE_FILTER" => {
+                                        let tick_size = filter.tickSize.as_ref().unwrap();
+                                        _step_price = tick_size.parse::<f64>().unwrap();
+                                        _move_price = move_decimal(tick_size);
+                                    }
+                                    _ => {}
                                 }
+                                let new_quantity_info = QuantityInfo {
+                                    symbol : _symbol.clone(),
+                                    min_qty : _min_qty.clone(), 
+                                    max_qty : _max_qty.clone(), 
+                                    step_qty : _step_qty,
+                                    step_price : _step_price,
+                                    move_qty : _move_qty,
+                                    move_price: _move_price
+                                };
+                                quantity_info.insert(_symbol.clone(), new_quantity_info);
                             }
                         }
                     }
@@ -154,4 +178,22 @@ pub fn fetch(symbols_cache: &Vec<String>) -> Option<HashMap<String, QuantityInfo
             }
         }
     }
+}
+
+fn move_decimal (step: &str) -> f64 {
+    let arr:Vec<&str> = step.split(".").collect();
+    let decimal_arr:Vec<&str> = arr[1].split("1").collect();
+    let decimal_point = match decimal_arr.len() {
+        2 => { // less than 1.00..
+            (decimal_arr[0].len() + 1) as f64 
+        },
+        1 => { // is 1.000
+            0.0 // no decimal point. 
+        },
+        _ => {println!("ERROR ?"); 0.0}
+    };
+    let one_decimal:f64 = 10.0;
+    let move_qty = one_decimal.powf(decimal_point);
+    // result
+    return move_qty
 }
