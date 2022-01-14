@@ -98,7 +98,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     let benchmark = SystemTime::now();
     println!("> -------------------------------------------------- <");
     //> for testing purpose.
-    return Some(0.0);
+    // return Some(0.0);
 
     // states
     let mut order_result:Option<f64> = None;

@@ -23,18 +23,20 @@ mod executor;
 //
 //
 const IS_DEBUG:bool = false;
+const IS_DETAIL:bool = false;
 
 const MAX_INVEST:f64 =50.0;// etc: BUSD = 368.18;
-const PROFIT_WARNING:f64 = 9.99;// percent
+const PROFIT_WARNING:f64 = 15.0;// percent
+const PROFIT_MINIMUM:f64 = 0.5;// percent
 
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
 const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 2 secs
 
 // how aggressive we create new orderbooks
-const SYM_A_STEP:f64 = 1.0;    // Buy stable-symbol <--- our loss to gain speed
-const SYM_B_STEP:f64 = 1.0;    // Sell symbol-bridge <--- main profit here
-const SYM_C_STEP:f64 = 10.0;    // Sell bridge-stable <---- minor profit by BTC delay
-const SAFE_LIFETIME:i32 = 3;   // ensure a trade last for some blocks before it disappear.
+const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
+const SYM_B_STEP:f64 = -2.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
+const SYM_C_STEP:f64 = -100.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
+const SAFE_LIFETIME:i32 = 0;    // ensure a trade last for some blocks before it disappear.
 
 pub struct RingResult {
     symbol :String,
@@ -186,8 +188,8 @@ fn update_orderbooks(
                                 if symbol_caches.contains(&ticker.symbol) {
                                     let step_price = quantity_info[&ticker.symbol].step_price;
                                     let new_a_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_A_STEP * step_price);
-                                    let new_b_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_B_STEP * step_price);
-                                    let new_c_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_C_STEP * step_price);
+                                    let new_b_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + SYM_B_STEP * step_price);
+                                    let new_c_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + SYM_C_STEP * step_price);
                                     tickers_a.entry(ticker.symbol.clone()).or_insert([new_a_price, ticker.bid_qty]);
                                     tickers_b.entry(ticker.symbol.clone()).or_insert([new_b_price, ticker.ask_qty]);
                                     tickers_c.entry(ticker.symbol.clone()).or_insert([new_c_price, ticker.ask_qty]);
@@ -228,7 +230,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     //
     // OK
     // let's say, we only accept profit > 0.5% and risk < 0.2%
-    if IS_DEBUG || profit > (0.5/100.0) * optimal_invest {
+    if profit > (PROFIT_MINIMUM/100.0) * optimal_invest {
         let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         // LOG
@@ -243,7 +245,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
         }
         //
         // PROFITABLE: normal log
-        if IS_DEBUG { println!("\n{}\n{}", log_profit, ring_details); }
+        if IS_DEBUG && IS_DETAIL { println!("\n{}\n{}", log_profit, ring_details); }
         return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
     }
     return None;
