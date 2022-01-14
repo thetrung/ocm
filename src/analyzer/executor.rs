@@ -18,7 +18,7 @@ use crate::analyzer::RingComponent;
 /// counting before dropping an ongoing order.
 const DROP_ORDER:i32 = 2;
 /// Wait time between orders
-const POLLING_ORDER: Duration = Duration::from_millis(1000);
+const POLLING_ORDER: Duration = Duration::from_millis(250);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.

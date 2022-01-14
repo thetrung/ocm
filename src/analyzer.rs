@@ -26,11 +26,11 @@ const IS_DEBUG:bool = false;
 const IS_DETAIL:bool = false;
 
 const MAX_INVEST:f64 =50.0;// etc: BUSD = 368.18;
-const PROFIT_WARNING:f64 = 15.0;// percent
+const PROFIT_WARNING:f64 = 9.0;// percent
 const PROFIT_MINIMUM:f64 = 0.5;// percent
 
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 2 secs
+const DELAY_INIT: Duration = Duration::from_millis(1000); // each block last 1 secs
 
 // how aggressive we create new orderbooks
 const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
@@ -335,6 +335,13 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             // Sort by Profit 
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
             println!("> found {} arbitrages.", arbitrage_count);
+            println!("____________________________");
+            for result in &round_result {
+                println!("| {:.2}% = ${:.2}   | {}",
+                result.percentage, result.profit,   result.symbol);
+            }
+            println!("____________________________");
+            println!();
             let trade = &round_result[0];
             // record lifetime for each trade
             if trade_best != trade.symbol { 
@@ -346,15 +353,6 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             if trade_lifetime > SAFE_LIFETIME {
                 println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks",
                 trade.symbol, trade.percentage, trade.profit, trade_lifetime);
-                if IS_DEBUG {
-                    println!();
-                    println!("____________________________");
-                    for result in &round_result {
-                        println!("| {:.2}% = ${:.2}   | {}",
-                        result.percentage, result.profit,   result.symbol);
-                    }
-                    println!("____________________________");
-                }
                 // Build ring prices
                 let final_ring = &rings[&trade.symbol];
                 let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
