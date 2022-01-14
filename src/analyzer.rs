@@ -23,14 +23,18 @@ mod executor;
 //
 //
 const IS_DEBUG:bool = false;
-const MAX_INVEST:f64 =50.0;//368.18;
+
+const MAX_INVEST:f64 =50.0;// etc: BUSD = 368.18;
+const PROFIT_WARNING:f64 = 9.99;// percent
+
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 secs
+const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 2 secs
 
 // how aggressive we create new orderbooks
-const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
-const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
-const SAFE_LIFETIME:i32 = 3; // ensure a trade last for some blocks before it disappear.
+const SYM_A_STEP:f64 = 1.0;    // Buy stable-symbol <--- our loss to gain speed
+const SYM_B_STEP:f64 = 1.0;    // Sell symbol-bridge <--- main profit here
+const SYM_C_STEP:f64 = 10.0;    // Sell bridge-stable <---- minor profit by BTC delay
+const SAFE_LIFETIME:i32 = 3;   // ensure a trade last for some blocks before it disappear.
 
 pub struct RingResult {
     symbol :String,
@@ -162,8 +166,9 @@ pub fn symbol_discovery<'a>(config: &Ini, market: &Market) -> HashMap<String, Ve
 /// This update tickers into ASK+BID table.
 fn update_orderbooks(
     market: &Market, symbol_caches: &Vec<String>,
-    tickers_buy: &mut HashMap<String, [f64;2]>, 
-    tickers_sell: &mut HashMap<String, [f64;2]>,
+    tickers_a: &mut HashMap<String, [f64;2]>, 
+    tickers_b: &mut HashMap<String, [f64;2]>,
+    tickers_c: &mut HashMap<String, [f64;2]>,
     quantity_info: &HashMap<String, QuantityInfo>
  ) -> bool {
     //
@@ -180,12 +185,12 @@ fn update_orderbooks(
                                 // add only ring symbols
                                 if symbol_caches.contains(&ticker.symbol) {
                                     let step_price = quantity_info[&ticker.symbol].step_price;
-                                    let new_bid_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + BID_STEP * step_price);
-                                    let new_ask_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + ASK_STEP * step_price);
-                                    tickers_buy.entry(ticker.symbol.clone()).or_insert([new_bid_price, ticker.bid_qty]);
-                                    tickers_sell.entry(ticker.symbol.clone()).or_insert([new_ask_price, ticker.ask_qty]);
-                                    // tickers_buy.entry(ticker.symbol.clone()).or_insert([ticker.bid_price, ticker.bid_qty]);
-                                    // tickers_sell.entry(ticker.symbol.clone()).or_insert([ticker.ask_price, ticker.ask_qty]);
+                                    let new_a_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_A_STEP * step_price);
+                                    let new_b_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_B_STEP * step_price);
+                                    let new_c_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_C_STEP * step_price);
+                                    tickers_a.entry(ticker.symbol.clone()).or_insert([new_a_price, ticker.bid_qty]);
+                                    tickers_b.entry(ticker.symbol.clone()).or_insert([new_b_price, ticker.ask_qty]);
+                                    tickers_c.entry(ticker.symbol.clone()).or_insert([new_c_price, ticker.ask_qty]);
                                 }
                             }
                         }
@@ -200,7 +205,9 @@ fn update_orderbooks(
 }
 /// Compute profit on each ring 
 pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
-    tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
+    tickers_a: HashMap<String, [f64;2]>, 
+    tickers_b: HashMap<String, [f64;2]>, 
+    tickers_c: HashMap<String, [f64;2]>) -> Option<RingResult> {
     //
     // IMPORTANT: 
     // we try to buy the best bid/ask but it really depends on strategy here.
@@ -210,10 +217,10 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     // - sell : will be lowest but higher than average price
     // - buy : will be highiest but lower than average price 
     //
-    let ring_prices = build_ring(&_ring, &tickers_buy, &tickers_sell);
+    let ring_prices = build_ring(&_ring, &tickers_a, &tickers_b, &tickers_c);
     //
     // is it profitable ? 
-    let warning_ratio = 5.0; // as ~ 5.0%
+    let warning_ratio = PROFIT_WARNING; // as ~ 5.0%
     let optimal_invest = if min_invest > MAX_INVEST { MAX_INVEST } else { min_invest };
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
     let profit = sum - optimal_invest;
@@ -221,7 +228,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     //
     // OK
     // let's say, we only accept profit > 0.5% and risk < 0.2%
-    if profit > (0.5/100.0) * optimal_invest {
+    if IS_DEBUG || profit > (0.5/100.0) * optimal_invest {
         let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         // LOG
@@ -243,7 +250,9 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
 }
 
 fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
-    tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
+    tickers_a: &HashMap<String, [f64;2]>, 
+    tickers_b: &HashMap<String, [f64;2]>, 
+    tickers_c: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
     //
     // THREADPOOL
     //
@@ -253,11 +262,12 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
         // copying data :
         let symbol = ring.0.clone(); // coin name
         let _ring = ring.1.clone();  // ring of pairs
-        let _tickers_buy = tickers_buy.clone();
-        let _tickers_sell = tickers_sell.clone();
+        let _tickers_a = tickers_a.clone();
+        let _tickers_b = tickers_b.clone();
+        let _tickers_c = tickers_c.clone();
         let _balance = balance.clone();
         // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_buy, _tickers_sell) });
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
         compute_pool.push(thread);
     }
     let mut round_result = vec![];
@@ -298,9 +308,10 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
     loop {
         let benchmark = SystemTime::now();  // BENCHMARK
         let mut tickers_update_time:Duration = Duration::from_millis(0);
-        let mut tickers_buy: HashMap<String, [f64;2]> = HashMap::new();
-        let mut tickers_sell: HashMap<String, [f64;2]> = HashMap::new();
-        match update_orderbooks(&market, &symbols_cache, &mut tickers_buy, &mut tickers_sell, &quantity_info) {
+        let mut tickers_a: HashMap<String, [f64;2]> = HashMap::new();
+        let mut tickers_b: HashMap<String, [f64;2]> = HashMap::new();
+        let mut tickers_c: HashMap<String, [f64;2]> = HashMap::new();
+        match update_orderbooks(&market, &symbols_cache, &mut tickers_a, &mut tickers_b, &mut tickers_c, &quantity_info) {
             true => { // Check time : 
                 match benchmark.elapsed() {
                     Ok(elapsed) => tickers_update_time = elapsed,
@@ -310,7 +321,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             false => return // break the loop.
         }
         // Get computed result 
-        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_buy, &tickers_sell);
+        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c);
         let arbitrage_count = round_result.len();
 
         // If there's profitable ring 
@@ -344,7 +355,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 }
                 // Build ring prices
                 let final_ring = &rings[&trade.symbol];
-                let ring_prices = build_ring(final_ring, &tickers_buy, &tickers_sell);
+                let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
 
                 // 2. send best trade > executor
                 ring_component.symbol = trade.symbol.clone(); 
@@ -399,12 +410,15 @@ fn correct_price_filter(symbol: &str, quantity_info: &HashMap<String, QuantityIn
 }
 
 /// Build buy-sell-sell vec![ prices , qty ] for a loopring.
-fn build_ring(ring: &Vec<String>, tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<[f64;2]>{
+fn build_ring(ring: &Vec<String>, 
+    tickers_a: &HashMap<String, [f64;2]>, 
+    tickers_b: &HashMap<String, [f64;2]>, 
+    tickers_c: &HashMap<String, [f64;2]>) -> Vec<[f64;2]>{
 
     // limit order strategy
-    let p1 = tickers_buy.get(&ring[0]).unwrap(); // LIMIT_BUY
-    let p2 = tickers_sell.get(&ring[1]).unwrap(); // LIMIT_SELL
-    let p3 = tickers_sell.get(&ring[2]).unwrap(); // LIMIT_SELL
+    let p1 = tickers_a.get(&ring[0]).unwrap(); // LIMIT_BUY
+    let p2 = tickers_b.get(&ring[1]).unwrap(); // LIMIT_SELL
+    let p3 = tickers_c.get(&ring[2]).unwrap(); // LIMIT_SELL
 
     // ticker average strategy
     // let p11 = tickers_buy.get(&ring[0]).unwrap(); 

@@ -18,7 +18,7 @@ use crate::analyzer::RingComponent;
 /// counting before dropping an ongoing order.
 const DROP_ORDER:i32 = 2;
 /// Wait time between orders
-const POLLING_ORDER: Duration = Duration::from_millis(250);
+const POLLING_ORDER: Duration = Duration::from_millis(1000);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
@@ -98,7 +98,7 @@ pub fn execute_final_ring(account: &Account, ring_component: &RingComponent,
     let benchmark = SystemTime::now();
     println!("> -------------------------------------------------- <");
     //> for testing purpose.
-    // return Some(0.0);
+    return Some(0.0);
 
     // states
     let mut order_result:Option<f64> = None;
