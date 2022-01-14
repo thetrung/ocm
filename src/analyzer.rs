@@ -30,16 +30,14 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 // how aggressive we create new orderbooks
 const BID_STEP:f64 = 1.0;  // sub is buy low, add is buy high ( less profit ).
 const ASK_STEP:f64 = -1.0; // sub is sell low, add is sell high ( more profit ).
-const SAFE_LIFETIME:i32 = 5; // ensure a trade last for some blocks before it disappear.
-const RISK_GAP:f64 = 30.0; // less than 10 is pretty safe.
+const SAFE_LIFETIME:i32 = 3; // ensure a trade last for some blocks before it disappear.
 
 pub struct RingResult {
     symbol :String,
     percentage :f64, 
     profit :f64, 
     qty :f64, 
-    optimal_invest :f64,
-    risk_gap: f64
+    optimal_invest :f64
 }
 
 pub struct RingComponent {
@@ -201,7 +199,7 @@ fn update_orderbooks(
     return false;
 }
 /// Compute profit on each ring 
-pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64, quantity_info: HashMap<String, QuantityInfo>,
+pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     tickers_buy: HashMap<String, [f64;2]>, tickers_sell: HashMap<String, [f64;2]>) -> Option<RingResult> {
     //
     // IMPORTANT: 
@@ -220,18 +218,10 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64, quanti
     let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
     let profit = sum - optimal_invest;
     //
-    // compute RISK: determine by GAP percent between top2 tickers.
-    let risk_gap = (
-        ( tickers_sell[&_ring[0]][0] - tickers_buy[&_ring[0]][0] ) / quantity_info[&_ring[0]].step_price + 
-        ( tickers_sell[&_ring[1]][0] - tickers_buy[&_ring[1]][0] ) / quantity_info[&_ring[1]].step_price + 
-        ( tickers_sell[&_ring[2]][0] - tickers_buy[&_ring[2]][0] ) / quantity_info[&_ring[2]].step_price ) 
-        / 3.0; // multiplier
-        // println!("{}: risk = {}", symbol, risk_gap);
-    //
     //
     // OK
     // let's say, we only accept profit > 0.5% and risk < 0.2%
-    if profit > (0.5/100.0) * optimal_invest && risk_gap < RISK_GAP {
+    if profit > (0.5/100.0) * optimal_invest {
         let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         // LOG
@@ -247,12 +237,12 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64, quanti
         //
         // PROFITABLE: normal log
         if IS_DEBUG { println!("\n{}\n{}", log_profit, ring_details); }
-        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest, risk_gap }); 
+        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
     }
     return None;
 }
 
-fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64, quantity_info: HashMap<String, QuantityInfo>,
+fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     tickers_buy: &HashMap<String, [f64;2]>, tickers_sell: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
     //
     // THREADPOOL
@@ -266,9 +256,8 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64, quantity_in
         let _tickers_buy = tickers_buy.clone();
         let _tickers_sell = tickers_sell.clone();
         let _balance = balance.clone();
-        let _quantity_info = quantity_info.clone();
         // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _quantity_info, _tickers_buy, _tickers_sell) });
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_buy, _tickers_sell) });
         compute_pool.push(thread);
     }
     let mut round_result = vec![];
@@ -321,7 +310,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
             false => return // break the loop.
         }
         // Get computed result 
-        let mut round_result = compute_rings( &rings, virtual_account.clone(), quantity_info.clone(), &tickers_buy, &tickers_sell);
+        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_buy, &tickers_sell);
         let arbitrage_count = round_result.len();
 
         // If there's profitable ring 
@@ -342,14 +331,14 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 trade_lifetime += 1; 
             }
             if trade_lifetime > SAFE_LIFETIME {
-                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks | risk: {}%",
-                trade.symbol, trade.percentage, trade.profit, trade_lifetime, trade.risk_gap);
+                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks",
+                trade.symbol, trade.percentage, trade.profit, trade_lifetime);
                 if IS_DEBUG {
                     println!();
                     println!("____________________________");
                     for result in &round_result {
-                        println!("| {:.2}% = ${:.2}  risk: {}%  | {}",
-                        result.percentage, result.profit,  result.risk_gap, result.symbol);
+                        println!("| {:.2}% = ${:.2}   | {}",
+                        result.percentage, result.profit,   result.symbol);
                     }
                     println!("____________________________");
                 }
