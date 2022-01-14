@@ -18,7 +18,8 @@ use crate::analyzer::RingComponent;
 
 /// counting before dropping an ongoing order.
 const DROP_ORDER:i32 = 3;
-const MIN_SHORT_SELLING_PROFIT:f64 = 0.1;
+const DROP_ORDER_PARTIAL:i32 = 6;
+const MIN_SHORT_SELLING_PROFIT:f64 = 0.01;
 
 /// Wait time between orders
 const POLLING_ORDER: Duration = Duration::from_millis(500);
@@ -26,7 +27,8 @@ const POLLING_ORDER: Duration = Duration::from_millis(500);
 
 /// Poll and Wait until an order is filled.
 fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, symbol: &str, origin_balance: f64, 
-    final_ring: &Vec<String>, ring_component: &RingComponent, is_1st_order: bool, is_short_selling: bool) -> Option<f64> {
+    final_ring: &Vec<String>, ring_component: &RingComponent, quantity_info: &HashMap<String,QuantityInfo>,
+    is_1st_order: bool, is_short_selling: bool) -> Option<f64> {
     let mut polling_count = 0;
     println!("> order: #{} for {} {}", &order_id.to_string().yellow(), qty.to_string().green(), &symbol.green());
     loop {
@@ -60,7 +62,7 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                                     println!("> cancelled #{} after {} polls.", order_id.to_string().yellow(), polling_count);
                                     match account.limit_sell(&final_ring[0], symbol_qty, tickers_symbol[1]) {
                                         Ok(result) => {
-                                            polling_order(&account, &market, result.order_id, qty, &final_ring[0], origin_balance, &final_ring, &ring_component, false, true);
+                                            polling_order(&account, &market, result.order_id, qty, &final_ring[0], origin_balance, &final_ring, &ring_component, &quantity_info, false, true);
                                             let _balance = get_balance(&account, &ring_component.stablecoin).unwrap();
                                             println!("> sold {} {} for {:.2}", result.executed_qty, &final_ring[0].green(), _balance - origin_balance);
                                             return None;
@@ -71,7 +73,7 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                                 },
                                 Err(e) => format_error(e.0)
                             }
-                        } else { println!("> new: not profitable for short-selling {:.2}", profit) }
+                        } //else { println!("> new: not profitable for short-selling {:.2}", profit) }
                     },
                     "PARTIALLY_FILLED" => { //WARNING: NOT TESTED
                         // NOTE: whole new set of actions here:
@@ -80,9 +82,10 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                         // - compute to see if profitable as: current asset > balance
                         // - sell if profitable.
                         // - hold or buy more if not.
-                        if !is_1st_order {
+                        if !is_1st_order && polling_count > DROP_ORDER_PARTIAL {
                             // get remaining qty
-                            let symbol_asset = answer.orig_qty.parse::<f64>().unwrap() - answer.executed_qty.parse::<f64>().unwrap(); 
+                            let symbol_asset = correct_price_filter(&final_ring[0], &quantity_info, 
+                            answer.orig_qty.parse::<f64>().unwrap() - answer.executed_qty.parse::<f64>().unwrap()); 
                             // with new bridge qty
                             let bridge_asset = get_balance(&account, &ring_component.bridge).unwrap();
                             // update prices
@@ -94,19 +97,19 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                                 println!("> partial_filled: waited {} polls >> sell now for {}", polling_count, sum - origin_balance);
                                 match account.limit_sell(&final_ring[0], symbol_asset, tickers_symbol[1]) {
                                     Ok(result) => {
-                                        polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, false, true);
-                                        println!("> sold {} {}", result.executed_qty, &final_ring[0])
+                                        polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, &quantity_info, false, true);
+                                        println!("> sold {} {}", result.executed_qty, &final_ring[0]);
+                                        match account.limit_sell(&final_ring[2], symbol_asset, tickers_bridge[1]) {
+                                            Ok(result) => {
+                                                polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, &quantity_info, false, true);
+                                                println!("> sold {} {}", result.executed_qty, &final_ring[2]);
+                                                return None; // break now.
+                                            },
+                                            Err(e) => format_error(e.0)
+                                        }
                                     },
                                     Err(e) => format_error(e.0)
                                 }
-                                match account.limit_sell(&final_ring[2], symbol_asset, tickers_bridge[1]) {
-                                    Ok(result) => {
-                                        polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, false, true);
-                                        println!("> sold {} {}", result.executed_qty, &final_ring[2])
-                                    },
-                                    Err(e) => format_error(e.0)
-                                }
-                                return None;
                             } else { println!("> it's not profitable to sell now: {}", sum - origin_balance) }
                         }
                     }
@@ -203,7 +206,7 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     &balance_qty.to_string().green(), symbol.green(), (optimal_invest/first_order).to_string().yellow());
     match account.limit_buy(symbol, balance_qty, prices[0][0]) {
     // match account.market_buy(symbol, balance_qty) {
-        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, true, false),
+        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, &quantity_info, true, false),
         Err(e) => { 
             format_error(e.0); 
             // return None; 
@@ -225,7 +228,7 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     println!("> limit_sell: {} {} at {}", 
     &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, custom_price) {
-        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, false, false),
+        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, &quantity_info, false, false),
         Err(e) => { 
             format_error(e.0);
             return None
@@ -248,7 +251,7 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, prices[2][0]) {
     // match account.market_sell(symbol, balance_qty) {
-        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, false, false),
+        Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, &quantity_info, false, false),
         Err(e) => { 
             format_error(e.0); 
             return None; // Error
