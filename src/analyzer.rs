@@ -21,6 +21,10 @@ mod executor;
 // as observe, any GAP > 0.1% is slow filling.
 // 0.4 ~ 0.7% may take very long time to fill. 
 //
+// Answer: 
+// just tuning SYM_B from -2.0 ask-> -2.0 bid 
+// will open up to a whole new range of stuffs.
+//
 //
 const IS_DEBUG:bool = false;
 const IS_DETAIL:bool = false;
@@ -30,13 +34,15 @@ const PROFIT_WARNING:f64 = 9.0;// percent
 const PROFIT_MINIMUM:f64 = 0.5;// percent
 
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(1000); // each block last 1 secs
+const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 secs
 
-// how aggressive we create new orderbooks
+// how aggressive we create new orderbooks, 
+// best = { 2.0 bid -2.0 ask -100.0 ask 2 safe } where profit around 0.6% ~ 0.3%
+// risk = { 2.0 bid -2.0 bid 0.0 ask 2 safe } where profit could be > 5%
 const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
 const SYM_B_STEP:f64 = -2.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
 const SYM_C_STEP:f64 = -100.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
-const SAFE_LIFETIME:i32 = 0;    // ensure a trade last for some blocks before it disappear.
+const SAFE_LIFETIME:i32 = 2;    // ensure a trade last for 3 blocks. 
 
 pub struct RingResult {
     symbol :String,
@@ -361,7 +367,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 ring_component.symbol = trade.symbol.clone(); 
                 println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
                 println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
-                let new_balance = executor::execute_final_ring(&account, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
+                let new_balance = executor::execute_final_ring(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                 let mut final_profit:f64 = 0.0;
                 // 3. wait for trade finish
                 // 4. evaluate profit
