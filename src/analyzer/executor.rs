@@ -267,3 +267,128 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
 
     return Some(balance_qty);
 }
+
+/// Execute best ring found in previous round result.
+pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_component: &RingComponent, final_ring: &Vec<String>, 
+    prices: &Vec<[f64;2]>, config_invest: f64, quantity_info: HashMap<String, QuantityInfo>) -> Option<f64> {
+    
+    let benchmark = SystemTime::now();
+    println!("> -------------------------------------------------- <");
+    //> for testing purpose.
+    // return Some(0.0);
+
+    // states
+    let mut order_result:Vec<(&str, u64)> = vec![];
+
+    // correct lots + step_size
+    let mut symbol:&str;
+    // let mut step_qty:f64 = 0.0;
+    // let mut step_price:f64 = 0.0;
+    let mut balance_qty:f64 = 0.0;
+    let mut custom_price:f64 = 0.0;
+    
+    // prepare balance 
+    let _current_balance = get_balance(&account, &ring_component.stablecoin).unwrap(); println!();
+    if _current_balance < config_invest / 5.0 { return None; } // Break because this will be serious error w/ only 20%
+    let optimal_invest = if config_invest > _current_balance { _current_balance } else { config_invest };
+
+
+    // step_qty = quantity_info[symbol].step_qty;
+    // step_price = quantity_info[symbol].step_price;
+    //
+    // 1. Sell OOKI-BTC
+    //
+    let order_qty_a = correct_lots_qty(&final_ring[0], optimal_invest/(prices[0][0]), &quantity_info); // which result in a (symbol)
+    let order_qty_b = correct_lots_qty(&final_ring[2], order_qty_a * prices[1][0], &quantity_info);    // which result in b (bridge)
+    let order_qty_c = correct_lots_qty(&final_ring[0], order_qty_b * prices[2][0], &quantity_info); // which result in c (stablecoin)
+    println!("> qty_result: {} -> {} -> {} -> {}", optimal_invest, order_qty_b, order_qty_a, order_qty_c);
+
+    // return Some(0.0);
+
+    let mut first_order:Option<f64> = None;
+
+    symbol = &final_ring[1];
+    balance_qty = order_qty_a; 
+    //
+    println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), 
+    symbol.green(), &prices[1][0].to_string().yellow());
+    match account.limit_sell(symbol, balance_qty, prices[1][0]) {
+    // match account.market_buy(symbol, balance_qty) {
+        Ok(answer) => {
+            first_order = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, 
+                &final_ring, &ring_component, &quantity_info, true, false);
+            // order_result.push((symbol, answer.order_id));    
+            },
+        Err(e) => format_error(e.0)
+    }
+    match first_order {
+        Some(executed_qty) => {
+            balance_qty = executed_qty;
+            format_result(balance_qty, &ring_component.symbol, &benchmark);
+        },
+        None => return Some(-1.0) 
+    }
+    //
+    // 2. Buy OOKI-BUSD
+    //
+    symbol = &final_ring[0];
+    balance_qty = order_qty_a;
+    // 
+    println!("> limit_buy: {} {} at {}", 
+    &balance_qty.to_string().green(), symbol.green(), &prices[0][0].to_string().yellow());
+    match account.limit_buy(symbol, balance_qty, prices[0][0]) {
+        Ok(answer) => order_result.push((symbol, answer.order_id)),
+        Err(e) => { 
+            format_error(e.0);
+            return None
+        },
+    }
+    // match order_result[1] {
+    //     Some(_) => { // Have to refresh because it's no longer executed qty.
+    //         // balance_qty = get_balance(&account, &ring_component.bridge).unwrap(); 
+    //         format_result(balance_qty, &ring_component.bridge, &benchmark);
+    //     }
+    //     None => return Some(-1.0)  // None can help to break + stop App.
+    // }
+
+    //
+    // 3. Sell BTC-BUSD
+    //
+    symbol = &final_ring[2];
+    balance_qty = order_qty_b;
+    println!("> limit_sell: {} {} at {}", 
+    &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
+    match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+        Ok(answer) => order_result.push((symbol, answer.order_id)),
+        Err(e) => { 
+            format_error(e.0); 
+            return None; // Error
+        }
+    }
+    // wait till all finished.
+    loop {
+        let mut finish_count = 0;
+        for result in &order_result {
+            match account.order_status(result.0, result.1) {
+                Ok(answer) => {
+                    match answer.status.as_str() {
+                        "FILLED" => {
+                            println!("> #{} finished with {} {}.", result.1, answer.executed_qty, result.1);
+                            finish_count+= 1;
+                        },
+                        _ => {}
+                    };
+                },
+                Err(e) => format_error(e.0)
+            }
+        }
+        if finish_count == 2 {break}
+        else { // reset counter + sleep
+            finish_count = 0;
+            thread::sleep(POLLING_ORDER);
+        }
+    }
+    println!("> all finished.");
+
+    return Some(get_balance(&account, &ring_component.stablecoin).unwrap());
+}

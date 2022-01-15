@@ -34,7 +34,7 @@ const PROFIT_WARNING:f64 = 9.0;// percent
 const PROFIT_MINIMUM:f64 = 0.5;// percent
 
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 secs
+const DELAY_INIT: Duration = Duration::from_millis(1000); // each block last 1 secs
 
 // how aggressive we create new orderbooks, 
 // best = { 2.0 bid -2.0 ask -100.0 ask 2 safe } where profit around 0.6% ~ 0.3%
@@ -42,7 +42,7 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
 const SYM_B_STEP:f64 = -2.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
 const SYM_C_STEP:f64 = -100.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
-const SAFE_LIFETIME:i32 = 2;    // ensure a trade last for 3 blocks. 
+const SAFE_LIFETIME:i32 = 0;    // ensure a trade last for 3 blocks. 
 
 pub struct RingResult {
     symbol :String,
@@ -266,10 +266,11 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     //
     let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
 
-    for ring in rings {
+    let ring = rings["TORN"].clone();
+    // for ring in rings {
         // copying data :
-        let symbol = ring.0.clone(); // coin name
-        let _ring = ring.1.clone();  // ring of pairs
+        let symbol = String::from("TORN");//ring.0.clone(); // coin name
+        let _ring = ring;//ring.1.clone();  // ring of pairs
         let _tickers_a = tickers_a.clone();
         let _tickers_b = tickers_b.clone();
         let _tickers_c = tickers_c.clone();
@@ -277,7 +278,7 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
         // spawn computation          
         let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
         compute_pool.push(thread);
-    }
+    // }
     let mut round_result = vec![];
     for computer in compute_pool {
         match computer.join().unwrap() {
@@ -334,21 +335,20 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
 
         // If there's profitable ring 
         if arbitrage_count > 0 {
-            let mut log = String::new();
-            log.push_str(&format!("\n> ===================[ Block {} ]=================== <\n", block_count.to_string().yellow()));
+            println!("\n> ===================[ Block {} ]=================== <\n", block_count.to_string().yellow());
             // tickers time
-            log.push_str(&format!("{}", format!("#{}: updated orderbooks in {} ms\n", 
-            block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow())));
+            println!("{}", format!("#{}: updated orderbooks in {} ms\n", 
+            block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
             // Sort by Profit 
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
-            log.push_str(&format!("> found {} arbitrages.\n", arbitrage_count));
-            log.push_str(&format!("____________________________\n"));
+            println!("> found {} arbitrages.\n", arbitrage_count);
+            println!("____________________________\n");
             for result in &round_result {
-                log.push_str(&format!("| {:.2}% = ${:.2}   | {}\n",
-                result.percentage, result.profit,   result.symbol));
-            }
-            log.push_str(&format!("____________________________\n"));
-            log.push_str(&format!("\n"));
+                println!("| {:.2}% = ${:.2}   | {}\n",
+                result.percentage, result.profit,   result.symbol);
+            };
+            println!("____________________________\n");
+            println!("\n");
             let trade = &round_result[0];
             // record lifetime for each trade
             if trade_best != trade.symbol { 
@@ -358,19 +358,19 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 trade_lifetime += 1; 
             }
             if trade_lifetime > SAFE_LIFETIME {
-                log.push_str(&format!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks.\n",
-                trade.symbol, trade.percentage, trade.profit, trade_lifetime));
+                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks.\n",
+                trade.symbol, trade.percentage, trade.profit, trade_lifetime);
                 // Build ring prices
                 let final_ring = &rings[&trade.symbol];
                 let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
 
                 // 2. send best trade > executor
                 ring_component.symbol = trade.symbol.clone(); 
-                log.push_str(&format!("> best: {} > {} > {}\n", ring_component.symbol, ring_component.bridge, ring_component.stablecoin));
-                log.push_str(&format!("> best: buy {} > sell {} > sell {}\n", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]));
-                println!("{}", log);
+                println!("> best: {} > {} > {}\n", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
+                println!("> best: buy {} > sell {} > sell {}\n", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
                 // show log
-                let new_balance = executor::execute_final_ring(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
+                let new_balance = executor::execute_final_ring_pallarel(
+                    &account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                 let mut final_profit:f64 = 0.0;
                 // 3. wait for trade finish
                 // 4. evaluate profit
