@@ -38,7 +38,7 @@ const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 s
 
 // how aggressive we create new orderbooks, 
 // best = { 2.0 bid -2.0 ask -100.0 ask 2 safe } where profit around 0.6% ~ 0.3%
-// risk = { 2.0 bid -2.0 bid 0.0 ask 2 safe } where profit could be > 5%
+// risk = { 2.0 ask 2.0 bid 0.0 ask 2 safe } where profit could be > 5%
 const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
 const SYM_B_STEP:f64 = -2.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
 const SYM_C_STEP:f64 = -100.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
