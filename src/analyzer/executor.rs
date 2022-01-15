@@ -17,7 +17,7 @@ use crate::exchangeinfo::QuantityInfo;
 use crate::analyzer::RingComponent;
 
 /// counting before dropping an ongoing order.
-const DROP_ORDER:i32 = 3;
+const DROP_ORDER:i32 = 4;
 const DROP_ORDER_PARTIAL:i32 = 6;
 const MIN_SHORT_SELLING_PROFIT:f64 = 0.01;
 
@@ -313,11 +313,9 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
     println!("> limit_sell: {} {} at {}", &balance_qty.to_string().green(), 
     symbol.green(), &prices[1][0].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, prices[1][0]) {
-    // match account.market_buy(symbol, balance_qty) {
         Ok(answer) => {
-            first_order = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, 
-                &final_ring, &ring_component, &quantity_info, true, false);
-            // order_result.push((symbol, answer.order_id));    
+            first_order = polling_order(&account, &market, answer.order_id, balance_qty, 
+            symbol, _current_balance, &final_ring, &ring_component, &quantity_info, true, false);
             },
         Err(e) => format_error(e.0)
     }
@@ -343,13 +341,6 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
             return None
         },
     }
-    // match order_result[1] {
-    //     Some(_) => { // Have to refresh because it's no longer executed qty.
-    //         // balance_qty = get_balance(&account, &ring_component.bridge).unwrap(); 
-    //         format_result(balance_qty, &ring_component.bridge, &benchmark);
-    //     }
-    //     None => return Some(-1.0)  // None can help to break + stop App.
-    // }
 
     //
     // 3. Sell BTC-BUSD
@@ -375,7 +366,7 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
                 Ok(answer) => {
                     match answer.status.as_str() {
                         "FILLED" => {
-                            println!("> #{} finished with {} {}.", result.1, answer.executed_qty, result.1);
+                            println!("> #{} finished with {} {}.", result.1, answer.executed_qty, result.0);
                             new_order_result.remove(index);
                             finish_count+= 1;
                         },

@@ -266,21 +266,22 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     //
     let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
 
-    let test_rings = ["TORN", "RAD"];
+    let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
     // only check testing rings:
-    for ring in rings {
-        if test_rings.contains(&ring.0.as_str()){
-            // copying data :
-            let symbol = ring.0.clone(); // coin name
-            let _ring = ring.1.clone();  // ring of pairs
-            let _tickers_a = tickers_a.clone();
-            let _tickers_b = tickers_b.clone();
-            let _tickers_c = tickers_c.clone();
-            let _balance = balance.clone();
-            // spawn computation          
-            let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
-            compute_pool.push(thread);
-        }
+    for test in test_rings {
+    // for ring in rings {
+        // copying data :
+        let _ring = rings[test].clone();
+        let symbol = String::from(test);
+        // let symbol = ring.0.clone(); // coin name
+        // let _ring = ring.1.clone();  // ring of pairs
+        let _tickers_a = tickers_a.clone();
+        let _tickers_b = tickers_b.clone();
+        let _tickers_c = tickers_c.clone();
+        let _balance = balance.clone();
+        // spawn computation          
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
+        compute_pool.push(thread);
     }
     let mut round_result = vec![];
     for computer in compute_pool {
@@ -336,8 +337,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c);
         let arbitrage_count = round_result.len();
 
-        // If there's profitable ring 
-        if arbitrage_count > 0 {
+        // If there's profitable ring AND binance didn't lag more than a second 
+        if arbitrage_count > 0 /*&& tickers_update_time < DELAY_INIT*/ {
             println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
             // tickers time
             println!("{}", format!("#{}: updated orderbooks in {} ms", 
@@ -379,6 +380,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 // 4. evaluate profit
                 match new_balance {
                     Some(_balance) => { 
+                        println!("> finish: block {}", block_count.to_string().yellow());
                         if _balance > 0.0 { 
                             final_profit = _balance - virtual_account; 
                             virtual_account = _balance; 
@@ -398,7 +400,8 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                                 }
                                 Err(e) => println!("Error: {:?}", e)
                             }
-                        }},
+                        }
+                    },
                     None => { return; // Quit Loop because there is error. 
                     }
                 }
