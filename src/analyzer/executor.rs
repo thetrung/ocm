@@ -17,12 +17,12 @@ use crate::exchangeinfo::QuantityInfo;
 use crate::analyzer::RingComponent;
 
 /// counting before dropping an ongoing order.
-const DROP_ORDER:i32 = 3;
+const DROP_ORDER:i32 = 2;
 const DROP_ORDER_PARTIAL:i32 = 6;
 const MIN_SHORT_SELLING_PROFIT:f64 = 0.01;
 
 /// Wait time between orders
-const POLLING_ORDER: Duration = Duration::from_millis(500);
+const POLLING_ORDER: Duration = Duration::from_millis(250);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
