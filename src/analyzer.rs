@@ -266,19 +266,22 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     //
     let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
 
-    let ring = rings["TORN"].clone();
-    // for ring in rings {
-        // copying data :
-        let symbol = String::from("TORN");//ring.0.clone(); // coin name
-        let _ring = ring;//ring.1.clone();  // ring of pairs
-        let _tickers_a = tickers_a.clone();
-        let _tickers_b = tickers_b.clone();
-        let _tickers_c = tickers_c.clone();
-        let _balance = balance.clone();
-        // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
-        compute_pool.push(thread);
-    // }
+    let test_rings = ["TORN", "RAD"];
+    // only check testing rings:
+    for ring in rings {
+        if test_rings.contains(&ring.0.as_str()){
+            // copying data :
+            let symbol = ring.0.clone(); // coin name
+            let _ring = ring.1.clone();  // ring of pairs
+            let _tickers_a = tickers_a.clone();
+            let _tickers_b = tickers_b.clone();
+            let _tickers_c = tickers_c.clone();
+            let _balance = balance.clone();
+            // spawn computation          
+            let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
+            compute_pool.push(thread);
+        }
+    }
     let mut round_result = vec![];
     for computer in compute_pool {
         match computer.join().unwrap() {
