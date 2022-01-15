@@ -334,20 +334,21 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
 
         // If there's profitable ring 
         if arbitrage_count > 0 {
-            println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
+            let mut log = String::new();
+            log.push_str(&format!("\n> ===================[ Block {} ]=================== <\n", block_count.to_string().yellow()));
             // tickers time
-            println!("{}", format!("#{}: updated orderbooks in {} ms", 
-            block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
+            log.push_str(&format!("{}", format!("#{}: updated orderbooks in {} ms\n", 
+            block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow())));
             // Sort by Profit 
             round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
-            println!("> found {} arbitrages.", arbitrage_count);
-            println!("____________________________");
+            log.push_str(&format!("> found {} arbitrages.\n", arbitrage_count));
+            log.push_str(&format!("____________________________\n"));
             for result in &round_result {
-                println!("| {:.2}% = ${:.2}   | {}",
-                result.percentage, result.profit,   result.symbol);
+                log.push_str(&format!("| {:.2}% = ${:.2}   | {}\n",
+                result.percentage, result.profit,   result.symbol));
             }
-            println!("____________________________");
-            println!();
+            log.push_str(&format!("____________________________\n"));
+            log.push_str(&format!("\n"));
             let trade = &round_result[0];
             // record lifetime for each trade
             if trade_best != trade.symbol { 
@@ -357,16 +358,18 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                 trade_lifetime += 1; 
             }
             if trade_lifetime > SAFE_LIFETIME {
-                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks",
-                trade.symbol, trade.percentage, trade.profit, trade_lifetime);
+                log.push_str(&format!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks.\n",
+                trade.symbol, trade.percentage, trade.profit, trade_lifetime));
                 // Build ring prices
                 let final_ring = &rings[&trade.symbol];
                 let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
 
                 // 2. send best trade > executor
                 ring_component.symbol = trade.symbol.clone(); 
-                println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-                println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
+                log.push_str(&format!("> best: {} > {} > {}\n", ring_component.symbol, ring_component.bridge, ring_component.stablecoin));
+                log.push_str(&format!("> best: buy {} > sell {} > sell {}\n", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]));
+                println!("{}", log);
+                // show log
                 let new_balance = executor::execute_final_ring(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                 let mut final_profit:f64 = 0.0;
                 // 3. wait for trade finish
@@ -380,7 +383,6 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                             // benchmark every block 
                             match benchmark.elapsed() {
                                 Ok(elapsed) => {
-                                    // println!("{:?}", &traded_volume_cache);
                                     let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
                                     block_count.to_string().yellow(), 
                                     format!("{:.2}", virtual_account).green(),
