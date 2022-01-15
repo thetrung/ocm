@@ -367,13 +367,16 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
     }
     // wait till all finished.
     loop {
+        let mut new_order_result = order_result.clone();
         let mut finish_count = 0;
+        let mut index = 0;
         for result in &order_result {
             match account.order_status(result.0, result.1) {
                 Ok(answer) => {
                     match answer.status.as_str() {
                         "FILLED" => {
                             println!("> #{} finished with {} {}.", result.1, answer.executed_qty, result.1);
+                            new_order_result.remove(index);
                             finish_count+= 1;
                         },
                         _ => {}
@@ -381,10 +384,13 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
                 },
                 Err(e) => format_error(e.0)
             }
+            index+=1;
         }
-        if finish_count == 2 {break}
+        if finish_count == order_result.len() {break}
         else { // reset counter + sleep
+            index = 0;
             finish_count = 0;
+            order_result = new_order_result.clone();
             thread::sleep(POLLING_ORDER);
         }
     }
