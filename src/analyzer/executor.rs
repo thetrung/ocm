@@ -49,7 +49,8 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                             Err(e) => format_error(e.0)
                         }
                     } else if polling_count > DROP_ORDER && !is_1st_order && !is_short_selling { 
-                        // NOTE: we can sell it now ? 
+                        // NOTE: SELL NOW IF PROFITABLE 
+                        // * we can sell current asset if it's profitable
                         //
                         let tickers_symbol = get_tickers_for(&market, &final_ring[0]);
                         let symbol_qty = answer.orig_qty.parse::<f64>().unwrap();
@@ -76,12 +77,9 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                         } //else { println!("> new: not profitable for short-selling {:.2}", profit) }
                     },
                     "PARTIALLY_FILLED" => { //WARNING: NOT TESTED
-                        // NOTE: whole new set of actions here:
-                        // * we can sell current asset if it's profitable
-                        // - fetch balance+tickers <- symbol+bridge
-                        // - compute to see if profitable as: current asset > balance
-                        // - sell if profitable.
-                        // - hold or buy more if not.
+                        // SELL PARTIAL FILLED ASSET 
+                        // - if wait for too long + profitable.
+                        //
                         if !is_1st_order && polling_count > DROP_ORDER_PARTIAL {
                             // get remaining qty
                             let symbol_asset = correct_price_filter(&final_ring[0], &quantity_info, 
@@ -92,17 +90,19 @@ fn polling_order(account: &Account, market: &Market, order_id: u64, qty: f64, sy
                             let tickers_symbol = get_tickers_for(&market, &final_ring[0]);
                             let tickers_bridge = get_tickers_for(&market, &final_ring[2]);
                             let sum = symbol_asset * tickers_symbol[1] + bridge_asset * tickers_bridge[1]; // to sell fast
+                            let profit = sum - origin_balance;
+                            if profit > MIN_SHORT_SELLING_PROFIT {
+                                println!("> partial_filled: waited {} polls >> sell now for {}", polling_count, profit);
 
-                            if sum > origin_balance {
-                                println!("> partial_filled: waited {} polls >> sell now for {}", polling_count, sum - origin_balance);
                                 match account.limit_sell(&final_ring[0], symbol_asset, tickers_symbol[1]) {
                                     Ok(result) => {
                                         polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, &quantity_info, false, true);
-                                        println!("> sold {} {}", result.executed_qty, &final_ring[0]);
-                                        match account.limit_sell(&final_ring[2], symbol_asset, tickers_bridge[1]) {
+                                        println!("> partial_filled: sold {} {}", result.executed_qty, &final_ring[0]);
+
+                                        match account.limit_sell(&final_ring[2], bridge_asset, tickers_bridge[1]) {
                                             Ok(result) => {
                                                 polling_order(&account, &market, result.order_id, symbol_asset, &final_ring[0], origin_balance, &final_ring, &ring_component, &quantity_info, false, true);
-                                                println!("> sold {} {}", result.executed_qty, &final_ring[2]);
+                                                println!("> partial_filled: sold {} {}", result.executed_qty, &final_ring[2]);
                                                 return None; // break now.
                                             },
                                             Err(e) => format_error(e.0)
