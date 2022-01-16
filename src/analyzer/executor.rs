@@ -15,6 +15,7 @@ use std::{
 
 use crate::exchangeinfo::QuantityInfo;
 use crate::analyzer::RingComponent;
+use crate::analyzer::IS_TESTING;
 
 /// counting before dropping an ongoing order.
 const DROP_ORDER:i32 = 4;
@@ -303,7 +304,7 @@ pub fn execute_final_ring_pallarel(account: &Account, market: &Market, ring_comp
     let order_qty_c = correct_lots_qty(&final_ring[0], order_qty_b * prices[2][0], &quantity_info); // which result in c (stablecoin)
     println!("> qty_result: {} -> {} -> {} -> {}", optimal_invest, order_qty_b, order_qty_a, order_qty_c);
 
-    // return Some(0.0);
+    if IS_TESTING { return Some(0.0); }
 
     let mut first_order:Option<f64> = None;
 

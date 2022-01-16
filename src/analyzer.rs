@@ -28,6 +28,7 @@ mod executor;
 //
 const IS_DEBUG:bool = false;
 const IS_DETAIL:bool = false;
+pub const IS_TESTING:bool = false;
 
 const MAX_INVEST:f64 =50.0;// etc: BUSD = 368.18;
 const PROFIT_WARNING:f64 = 9.0;// percent
@@ -211,6 +212,44 @@ fn update_orderbooks(
     };
     return false;
 }
+
+fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
+    tickers_a: &HashMap<String, [f64;2]>, 
+    tickers_b: &HashMap<String, [f64;2]>, 
+    tickers_c: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
+    //
+    // THREADPOOL
+    //
+    let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
+
+    let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
+    // only check testing rings:
+    for test in test_rings {
+    // for ring in rings {
+        // copying data :
+        let _ring = rings[test].clone();
+        let symbol = String::from(test);
+        // let symbol = ring.0.clone(); // coin name
+        // let _ring = ring.1.clone();  // ring of pairs
+        let _tickers_a = tickers_a.clone();
+        let _tickers_b = tickers_b.clone();
+        let _tickers_c = tickers_c.clone();
+        let _balance = balance.clone();
+        // spawn computation          
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
+        compute_pool.push(thread);
+    }
+    let mut round_result = vec![];
+    for computer in compute_pool {
+        match computer.join().unwrap() {
+            Some(result) => round_result.push(result),
+            None => {}
+        }
+    }
+    if IS_DEBUG { println!("> result: {} profitable rings", round_result.len()); }
+    return round_result;
+}
+
 /// Compute profit on each ring 
 pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     tickers_a: HashMap<String, [f64;2]>, 
@@ -255,43 +294,6 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
         return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
     }
     return None;
-}
-
-fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
-    tickers_a: &HashMap<String, [f64;2]>, 
-    tickers_b: &HashMap<String, [f64;2]>, 
-    tickers_c: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
-    //
-    // THREADPOOL
-    //
-    let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
-
-    let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
-    // only check testing rings:
-    for test in test_rings {
-    // for ring in rings {
-        // copying data :
-        let _ring = rings[test].clone();
-        let symbol = String::from(test);
-        // let symbol = ring.0.clone(); // coin name
-        // let _ring = ring.1.clone();  // ring of pairs
-        let _tickers_a = tickers_a.clone();
-        let _tickers_b = tickers_b.clone();
-        let _tickers_c = tickers_c.clone();
-        let _balance = balance.clone();
-        // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
-        compute_pool.push(thread);
-    }
-    let mut round_result = vec![];
-    for computer in compute_pool {
-        match computer.join().unwrap() {
-            Some(result) => round_result.push(result),
-            None => {}
-        }
-    }
-    if IS_DEBUG { println!("> result: {} profitable rings", round_result.len()); }
-    return round_result;
 }
 
 pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>, 
