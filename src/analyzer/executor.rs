@@ -182,8 +182,8 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
 
     // correct lots + step_size
     let mut symbol:&str;
-    let mut step_qty:f64 = 0.0;
-    let mut step_price:f64 = 0.0;
+    // let mut step_qty:f64 = 0.0;
+    // let mut step_price:f64 = 0.0;
     let mut balance_qty:f64 = 0.0;
     let mut custom_price:f64 = 0.0;
     

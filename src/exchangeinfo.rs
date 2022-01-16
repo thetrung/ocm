@@ -3,8 +3,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Result; 
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize)]
 struct ExchangeInfo {
     timezone: String,
@@ -14,6 +14,7 @@ struct ExchangeInfo {
     symbols:	Vec<Symbol>
 }
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize)]
 struct RateLimits {
     rateLimitType : String,
@@ -22,6 +23,7 @@ struct RateLimits {
     limit : i64
 }
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize)]
 struct Filter {
     filterType: String,       // LOT_SIZE : since MARKET_LOT_SIZE = "0.00000000" most of time.
@@ -44,6 +46,7 @@ struct Filter {
     maxNumAlgoOrders	:Option<i32>,
 }
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize)]
 struct Symbol {
     symbol	: String,       // pair symbol

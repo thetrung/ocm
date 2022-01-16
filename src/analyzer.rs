@@ -6,7 +6,7 @@ use std::{
 use colored::*;
 use configparser::ini::Ini;
 
-use binance::errors::ErrorKind as BinanceLibErrorKind;
+// use binance::errors::ErrorKind as BinanceLibErrorKind;
 use binance::{api::*, model::{Prices, SymbolPrice}};
 use binance::account::*;
 use binance::market::*;
@@ -324,93 +324,97 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         let mut tickers_a: HashMap<String, [f64;2]> = HashMap::new();
         let mut tickers_b: HashMap<String, [f64;2]> = HashMap::new();
         let mut tickers_c: HashMap<String, [f64;2]> = HashMap::new();
-        match update_orderbooks(&market, &symbols_cache, &mut tickers_a, &mut tickers_b, &mut tickers_c, &quantity_info) {
+        let is_prices_updated = update_orderbooks(&market, &symbols_cache, &mut tickers_a, &mut tickers_b, &mut tickers_c, &quantity_info);
+        match is_prices_updated {
             true => { // Check time : 
                 match benchmark.elapsed() {
                     Ok(elapsed) => tickers_update_time = elapsed,
                     Err(e) => println!("> can't benchmark update_orderbooks: {:?}", e)
                 }
             },
-            false => return // break the loop.
+            false => thread::sleep(DELAY_INIT) // wait for a while...
+            //false => return // break the loop.
         }
-        // Get computed result 
-        let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c);
-        let arbitrage_count = round_result.len();
+        if is_prices_updated {
+            // Get computed result 
+            let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c);
+            let arbitrage_count = round_result.len();
 
-        // If there's profitable ring AND binance didn't lag more than a second 
-        if arbitrage_count > 0 /*&& tickers_update_time < DELAY_INIT*/ {
-            println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
-            // tickers time
-            println!("{}", format!("#{}: updated orderbooks in {} ms", 
-            block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
-            // Sort by Profit 
-            round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
-            println!("> found {} arbitrages.", arbitrage_count);
-            println!("____________________________");
-            for result in &round_result {
-                println!("| {:.2}% = ${:.2}   | {}",
-                result.percentage, result.profit,   result.symbol);
-            };
-            println!("____________________________");
-            println!();
-            let trade = &round_result[0];
-            // record lifetime for each trade
-            if trade_best != trade.symbol { 
-                trade_lifetime = 0; // restart
-                trade_best = trade.symbol.clone();  
-            } else { 
-                trade_lifetime += 1; 
-            }
-            if trade_lifetime > SAFE_LIFETIME {
-                println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks.",
-                trade.symbol, trade.percentage, trade.profit, trade_lifetime);
-                // Build ring prices
-                let final_ring = &rings[&trade.symbol];
-                let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
+            // If there's profitable ring AND binance didn't lag more than a second 
+            if arbitrage_count > 0 /*&& tickers_update_time < DELAY_INIT*/ {
+                println!("\n> ===================[ Block {} ]=================== <", block_count.to_string().yellow());
+                // tickers time
+                println!("{}", format!("#{}: updated orderbooks in {} ms", 
+                block_count.to_string().yellow(), tickers_update_time.as_millis().to_string().yellow()));
+                // Sort by Profit 
+                round_result.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
+                println!("> found {} arbitrages.", arbitrage_count);
+                println!("____________________________");
+                for result in &round_result {
+                    println!("| {:.2}% = ${:.2}   | {}",
+                    result.percentage, result.profit,   result.symbol);
+                };
+                println!("____________________________");
+                println!();
+                let trade = &round_result[0];
+                // record lifetime for each trade
+                if trade_best != trade.symbol { 
+                    trade_lifetime = 0; // restart
+                    trade_best = trade.symbol.clone();  
+                } else { 
+                    trade_lifetime += 1; 
+                }
+                if trade_lifetime > SAFE_LIFETIME {
+                    println!("> best: {} | {:.2}% = ${:.2} | alive: {} blocks.",
+                    trade.symbol, trade.percentage, trade.profit, trade_lifetime);
+                    // Build ring prices
+                    let final_ring = &rings[&trade.symbol];
+                    let ring_prices = build_ring(final_ring, &tickers_a, &tickers_b, &tickers_c);
 
-                // 2. send best trade > executor
-                ring_component.symbol = trade.symbol.clone(); 
-                println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-                println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
-                // show log
-                let new_balance:Option<f64> = executor::execute_final_ring_pallarel(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
-                let mut final_profit:f64 = 0.0;
-                // 3. wait for trade finish
-                // 4. evaluate profit
-                match new_balance {
-                    Some(_balance) => { 
-                        println!("> end of block {}.", block_count.to_string().yellow());
-                        if _balance > 0.0 { 
-                            final_profit = _balance - virtual_account; 
-                            virtual_account = _balance; 
-                            
-                            // benchmark every block 
-                            match benchmark.elapsed() {
-                                Ok(elapsed) => {
-                                    let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
-                                    block_count.to_string().yellow(), 
-                                    format!("{:.2}", virtual_account).green(),
-                                    format!("{:.2}", trade.qty).green(), 
-                                    trade.symbol.green(), 
-                                    format!("{:.2}", final_profit).yellow(),
-                                    format!("{:.2}", trade.profit).yellow(),  
-                                    elapsed.as_millis().to_string().yellow());
-                                    println!("{}", fmt);
+                    // 2. send best trade > executor
+                    ring_component.symbol = trade.symbol.clone(); 
+                    println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
+                    println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
+                    // show log
+                    let new_balance:Option<f64> = executor::execute_final_ring_pallarel(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
+                    let mut final_profit:f64 = 0.0;
+                    // 3. wait for trade finish
+                    // 4. evaluate profit
+                    match new_balance {
+                        Some(_balance) => { 
+                            println!("> end of block {}.", block_count.to_string().yellow());
+                            if _balance > 0.0 { 
+                                final_profit = _balance - virtual_account; 
+                                virtual_account = _balance; 
+                                
+                                // benchmark every block 
+                                match benchmark.elapsed() {
+                                    Ok(elapsed) => {
+                                        let fmt = format!("#{}: ${} - trade {} {} for ${}/${} in {} ms",
+                                        block_count.to_string().yellow(), 
+                                        format!("{:.2}", virtual_account).green(),
+                                        format!("{:.2}", trade.qty).green(), 
+                                        trade.symbol.green(), 
+                                        format!("{:.2}", final_profit).yellow(),
+                                        format!("{:.2}", trade.profit).yellow(),  
+                                        elapsed.as_millis().to_string().yellow());
+                                        println!("{}", fmt);
+                                    }
+                                    Err(e) => println!("Error: {:?}", e)
                                 }
-                                Err(e) => println!("Error: {:?}", e)
                             }
+                        },
+                        None => { return; // Quit Loop because there is error. 
                         }
-                    },
-                    None => { return; // Quit Loop because there is error. 
                     }
                 }
-            }
-        //5. next block !
-        block_count += 1;
+            //5. next block !
+            block_count += 1;
+            } 
+            else if IS_DEBUG { println!("> no arbitrage chances."); }
+            // BLOCK-TIME
+            thread::sleep(DELAY_INIT);        
         } 
-        else if IS_DEBUG { println!("> no arbitrage chances."); }
-        // BLOCK-TIME
-        thread::sleep(DELAY_INIT);         
     }
     // ending
     println!("\n> RailGun Out.\n");
