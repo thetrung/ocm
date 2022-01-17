@@ -28,7 +28,7 @@ mod executor;
 //
 const IS_DEBUG:bool = false;
 const IS_DETAIL:bool = false;
-pub const IS_TESTING:bool = true;
+pub const IS_TESTING:bool = false;
 
 const MAX_INVEST:f64 =100.0;// etc: BUSD = 368.18;
 const PROFIT_WARNING:f64 = 9.0;// percent
@@ -227,8 +227,8 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     // for test in test_rings {
     for ring in rings {
         // copying data :
-        // let _ring = rings[test].clone();
-        // let symbol = String::from(test);
+        // let _ring = rings[test].clone(); // need to swap with 2 other lines below for parallel trade.
+        // let symbol = String::from(test); // need to swap with 2 other lines below for parallel trade.
         let symbol = ring.0.clone(); // coin name
         let _ring = ring.1.clone();  // ring of pairs
         let _tickers_a = tickers_a.clone();
