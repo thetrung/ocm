@@ -28,9 +28,9 @@ mod executor;
 //
 const IS_DEBUG:bool = false;
 const IS_DETAIL:bool = false;
-pub const IS_TESTING:bool = false;
+pub const IS_TESTING:bool = true;
 
-const MAX_INVEST:f64 =50.0;// etc: BUSD = 368.18;
+const MAX_INVEST:f64 =100.0;// etc: BUSD = 368.18;
 const PROFIT_WARNING:f64 = 9.0;// percent
 const PROFIT_MINIMUM:f64 = 0.5;// percent
 
@@ -222,15 +222,15 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     //
     let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
 
-    let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
+    // let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
     // only check testing rings:
-    for test in test_rings {
-    // for ring in rings {
+    // for test in test_rings {
+    for ring in rings {
         // copying data :
-        let _ring = rings[test].clone();
-        let symbol = String::from(test);
-        // let symbol = ring.0.clone(); // coin name
-        // let _ring = ring.1.clone();  // ring of pairs
+        // let _ring = rings[test].clone();
+        // let symbol = String::from(test);
+        let symbol = ring.0.clone(); // coin name
+        let _ring = ring.1.clone();  // ring of pairs
         let _tickers_a = tickers_a.clone();
         let _tickers_b = tickers_b.clone();
         let _tickers_c = tickers_c.clone();
@@ -378,7 +378,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                     println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
                     println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
                     // show log
-                    let new_balance:Option<f64> = executor::execute_final_ring_pallarel(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
+                    let new_balance:Option<f64> = executor::execute_final_ring(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                     let mut final_profit:f64 = 0.0;
                     // 3. wait for trade finish
                     // 4. evaluate profit
