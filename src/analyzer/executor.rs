@@ -176,7 +176,7 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     let benchmark = SystemTime::now();
     println!("> -------------------------------------------------- <");
     //> for testing purpose.
-    // return Some(0.0);
+    if IS_TESTING { return Some(0.0); }
 
     // states
     let mut order_result:Option<f64> = None;
