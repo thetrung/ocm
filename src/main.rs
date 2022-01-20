@@ -32,7 +32,6 @@ fn main() {
     let mut config = Ini::new();
     let _ = config.load("config.toml");
     let market = analyzer::get_market(&mut config);
-    // return;
     //
     // BUILD RINGS
     //

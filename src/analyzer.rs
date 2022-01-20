@@ -35,14 +35,14 @@ const PROFIT_WARNING:f64 = 9.0;// percent
 const PROFIT_MINIMUM:f64 = 0.5;// percent
 
 const SYMBOL_CACHE_FILE:&str = "symbols.cache";
-const DELAY_INIT: Duration = Duration::from_millis(1000); // each block last 1 secs
+const DELAY_INIT: Duration = Duration::from_millis(2000); // each block last 1 secs
 
 // how aggressive we create new orderbooks, 
 // best = { 2.0 bid -2.0 ask -100.0 ask 2 safe } where profit around 0.6% ~ 0.3%
 // risk = { 2.0 ask 2.0 bid 0.0 ask 2 safe } where profit could be > 5%
-const SYM_A_STEP:f64 = 2.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
-const SYM_B_STEP:f64 = -2.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
-const SYM_C_STEP:f64 = -100.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
+const SYM_A_STEP:f64 = 1.0;     // Buy stable-symbol <--- loss for speed,              higher is new orderbook
+const SYM_B_STEP:f64 = 1.0;    // Sell symbol-bridge <--- MAIN profit here,            lower is new orderbook
+const SYM_C_STEP:f64 = 1.0;  // Sell bridge-stable <--- minor profit by BTC delay,   lower is new orderbook
 const SAFE_LIFETIME:i32 = 0;    // ensure a trade last for 3 blocks. 
 
 pub struct RingResult {
@@ -194,12 +194,18 @@ fn update_orderbooks(
                                 // add only ring symbols
                                 if symbol_caches.contains(&ticker.symbol) {
                                     let step_price = quantity_info[&ticker.symbol].step_price;
-                                    let new_a_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_A_STEP * step_price);
-                                    let new_b_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + SYM_B_STEP * step_price);
-                                    let new_c_price = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price + SYM_C_STEP * step_price);
-                                    tickers_a.entry(ticker.symbol.clone()).or_insert([new_a_price, ticker.bid_qty]);
-                                    tickers_b.entry(ticker.symbol.clone()).or_insert([new_b_price, ticker.ask_qty]);
-                                    tickers_c.entry(ticker.symbol.clone()).or_insert([new_c_price, ticker.ask_qty]);
+                                    let new_a_price_bid = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_A_STEP * step_price);
+                                    let new_b_price_bid = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_B_STEP * step_price);
+                                    let new_c_price_bid = correct_price_filter(&ticker.symbol, quantity_info, ticker.bid_price + SYM_C_STEP * step_price);
+                                    let new_a_price_ask = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - SYM_A_STEP * step_price);
+                                    let new_b_price_ask = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - SYM_B_STEP * step_price);
+                                    let new_c_price_ask = correct_price_filter(&ticker.symbol, quantity_info, ticker.ask_price - SYM_C_STEP * step_price);
+                                    // tickers_a.entry(ticker.symbol.clone()).or_insert([new_a_price, ticker.bid_qty]);
+                                    // tickers_b.entry(ticker.symbol.clone()).or_insert([new_b_price, ticker.ask_qty]);
+                                    // tickers_c.entry(ticker.symbol.clone()).or_insert([new_c_price, ticker.ask_qty]);
+                                    tickers_a.entry(ticker.symbol.clone()).or_insert([new_a_price_bid, new_a_price_ask]);
+                                    tickers_b.entry(ticker.symbol.clone()).or_insert([new_b_price_bid, new_b_price_ask]);
+                                    tickers_c.entry(ticker.symbol.clone()).or_insert([new_c_price_bid, new_c_price_ask]);
                                 }
                             }
                         }
@@ -216,13 +222,14 @@ fn update_orderbooks(
 fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
     tickers_a: &HashMap<String, [f64;2]>, 
     tickers_b: &HashMap<String, [f64;2]>, 
-    tickers_c: &HashMap<String, [f64;2]>) -> Vec<RingResult>{
+    tickers_c: &HashMap<String, [f64;2]>,
+    quantity_info: &HashMap<String, QuantityInfo>) -> Vec<RingResult>{
     //
     // THREADPOOL
     //
     let mut compute_pool:Vec<JoinHandle<Option<RingResult>>> = vec![];
 
-    // let test_rings = ["TORN", "ORN", "CHESS"]; //  QUICK, STRAX, RGT, CVX, RAD
+    // let test_rings = ["TORN"];//  QUICK, STRAX, RGT, CVX, RAD, ORN, CHESS
     // only check testing rings:
     // for test in test_rings {
     for ring in rings {
@@ -234,9 +241,10 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
         let _tickers_a = tickers_a.clone();
         let _tickers_b = tickers_b.clone();
         let _tickers_c = tickers_c.clone();
+        let _quantity_info = quantity_info.clone();
         let _balance = balance.clone();
         // spawn computation          
-        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c) });
+        let thread = thread::spawn(move || { analyze_ring(symbol, _ring, _balance, _tickers_a, _tickers_b, _tickers_c, _quantity_info) });
         compute_pool.push(thread);
     }
     let mut round_result = vec![];
@@ -254,29 +262,45 @@ fn compute_rings(rings: &HashMap<String, Vec<String>>, balance: f64,
 pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
     tickers_a: HashMap<String, [f64;2]>, 
     tickers_b: HashMap<String, [f64;2]>, 
-    tickers_c: HashMap<String, [f64;2]>) -> Option<RingResult> {
-    //
-    // IMPORTANT: 
-    // we try to buy the best bid/ask but it really depends on strategy here.
-    // reverse this behaviour and the profit trade is different.
-    // if we use orderbook of sell/buy/buy for BUY-SELL-SELL sequence,
-    // there will be almost no chance to gain profit, because :
-    // - sell : will be lowest but higher than average price
-    // - buy : will be highiest but lower than average price 
+    tickers_c: HashMap<String, [f64;2]>,
+    quantity_info: HashMap<String, QuantityInfo>) -> Option<RingResult> {
+    // NOTE:
+    // what I'm thinking here, is that we analyze how many price step,
+    // we can take forward or backward in this gap. Therefore, maximize 
+    // the flexibility of our choice to speed up the order filling.
     //
     let ring_prices = build_ring(&_ring, &tickers_a, &tickers_b, &tickers_c);
+    let price_gap_a = correct_price_filter(&_ring[0], &quantity_info, ring_prices[0][1] - ring_prices[0][0]);
+    let price_gap_b = correct_price_filter(&_ring[1], &quantity_info, ring_prices[1][1] - ring_prices[1][0]);
+    let price_gap_c = correct_price_filter(&_ring[2], &quantity_info, ring_prices[2][1] - ring_prices[2][0]);
     //
     // is it profitable ? 
+    let fees = 1.0 - (0.075/100.0);
     let warning_ratio = PROFIT_WARNING; // as ~ 5.0%
+    let mut min_invest = min_invest;
+    if IS_TESTING { min_invest = 50.0; }
     let optimal_invest = if min_invest > MAX_INVEST { MAX_INVEST } else { min_invest };
-    let sum = ( optimal_invest / ring_prices[0][0] ) * ring_prices[1][0] * ring_prices[2][0];
+
+    // best
+    let sum =  (optimal_invest / ring_prices[0][0]) * ring_prices[1][1] * ring_prices[2][1] * fees * fees * fees;
     let profit = sum - optimal_invest;
+
+    // worst
+    let sum_worst = optimal_invest / ring_prices[0][1] * ring_prices[1][0] * ring_prices[2][0] * fees * fees * fees;
+    let profit_worst = sum_worst - optimal_invest;
     //
     //
     // OK
     // let's say, we only accept profit > 0.5% and risk < 0.2%
     if profit > (PROFIT_MINIMUM/100.0) * optimal_invest {
-        let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
+        println!("\n> analyze: {} has {} steps", &_ring[0], 
+            correct_price_filter(&_ring[0], &quantity_info, price_gap_a/quantity_info[&_ring[0]].step_price));
+        println!("> analyze: {} has {} steps", &_ring[1], 
+            correct_price_filter(&_ring[1], &quantity_info,price_gap_b/quantity_info[&_ring[1]].step_price));
+        println!("> analyze: {} has {} steps", &_ring[2], 
+            correct_price_filter(&_ring[2], &quantity_info,price_gap_c/quantity_info[&_ring[2]].step_price));
+        println!("> profit: best/worst = {:.2} / {:.2}", profit, profit_worst);
+        //let qty = optimal_invest / ring_prices[0][0];       // println!("optimal / price {} = {}", symbol ,qty);
         let percentage = (profit/optimal_invest)*100.0;     // Ranking w/ Profit
         // LOG
         let ring_details = format!("{:?} > {:?} > {:?}", ring_prices[0], ring_prices[1], ring_prices[2]).to_string().cyan();
@@ -291,7 +315,7 @@ pub fn analyze_ring( symbol: String, _ring: Vec<String>, min_invest: f64,
         //
         // PROFITABLE: normal log
         if IS_DEBUG && IS_DETAIL { println!("\n{}\n{}", log_profit, ring_details); }
-        return Some(RingResult { symbol, percentage, profit, qty, optimal_invest }); 
+        return Some(RingResult { symbol, percentage, profit, qty:0.0, optimal_invest }); 
     }
     return None;
 }
@@ -339,7 +363,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
         }
         if is_prices_updated {
             // Get computed result 
-            let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c);
+            let mut round_result = compute_rings( &rings, virtual_account.clone(), &tickers_a, &tickers_b, &tickers_c, quantity_info);
             let arbitrage_count = round_result.len();
 
             // If there's profitable ring AND binance didn't lag more than a second 
@@ -376,7 +400,7 @@ pub fn init_threads(config: &Ini, market: &Market, symbols_cache: &Vec<String>,
                     // 2. send best trade > executor
                     ring_component.symbol = trade.symbol.clone(); 
                     println!("> best: {} > {} > {}", ring_component.symbol, ring_component.bridge, ring_component.stablecoin);
-                    println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][0], ring_prices[2][0]);
+                    println!("> best: buy {} > sell {} > sell {}", ring_prices[0][0], ring_prices[1][1], ring_prices[2][1]);
                     // show log
                     let new_balance:Option<f64> = executor::execute_final_ring(&account, &market, &ring_component, final_ring, &ring_prices, trade.optimal_invest, quantity_info.clone());
                     let mut final_profit:f64 = 0.0;

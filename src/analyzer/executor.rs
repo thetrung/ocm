@@ -18,12 +18,12 @@ use crate::analyzer::RingComponent;
 use crate::analyzer::IS_TESTING;
 
 /// counting before dropping an ongoing order.
-const DROP_ORDER:i32 = 4;
+const DROP_ORDER:i32 = 3;
 const DROP_ORDER_PARTIAL:i32 = 6;
 const MIN_SHORT_SELLING_PROFIT:f64 = 0.01;
 
 /// Wait time between orders
-const POLLING_ORDER: Duration = Duration::from_millis(250);
+const POLLING_ORDER: Duration = Duration::from_millis(500);
 // const POLLING_ORDER_WAIT: Duration = Duration::from_millis(1000);
 
 /// Poll and Wait until an order is filled.
@@ -225,9 +225,9 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     //
     symbol = &final_ring[1];
     balance_qty = correct_lots_qty(symbol, balance_qty, &quantity_info); 
-    custom_price = correct_price_filter(symbol, &quantity_info, prices[1][0]);
+    custom_price = correct_price_filter(symbol, &quantity_info, prices[1][1]);
     println!("> limit_sell: {} {} at {}", 
-    &balance_qty.to_string().green(), symbol.green(), &prices[1][0].to_string().yellow());
+    &balance_qty.to_string().green(), symbol.green(), &prices[1][1].to_string().yellow());
     match account.limit_sell(symbol, balance_qty, custom_price) {
         Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, &quantity_info, false, false),
         Err(e) => { 
@@ -249,8 +249,8 @@ pub fn execute_final_ring(account: &Account, market: &Market, ring_component: &R
     symbol = &final_ring[2];
     balance_qty = correct_lots_qty(symbol, balance_qty, &quantity_info);
     println!("> limit_sell: {} {} at {}", 
-    &balance_qty.to_string().green(), symbol.green(), &prices[2][0].to_string().yellow());
-    match account.limit_sell(symbol, balance_qty, prices[2][0]) {
+    &balance_qty.to_string().green(), symbol.green(), &prices[2][1].to_string().yellow());
+    match account.limit_sell(symbol, balance_qty, prices[2][1]) {
     // match account.market_sell(symbol, balance_qty) {
         Ok(answer) => order_result = polling_order(&account, &market, answer.order_id, balance_qty, symbol, _current_balance, &final_ring, &ring_component, &quantity_info, false, false),
         Err(e) => { 
