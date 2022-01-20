@@ -1,5 +1,5 @@
 # Railgun
-A abitrage bot that find and execute profitable trades in symbols loop.
+A abitrage bot that find and execute profitable trades in symbols loop. I wrote this while watching Queen's Gambit, feel the competitive atmosphere suit this alot. Things I learned from making this were noted down in `NOTE.md`. Beside, this was a really good Rust pratice for me, to understand more about its ecosystem, how it work in real world application. And how fast it actually is.
 
 #### USAGE
 - Create new file called `config.toml` with content: 
